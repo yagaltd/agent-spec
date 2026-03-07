@@ -1,0 +1,13 @@
+# agent-spec Integration for Aider
+#
+# Workflow:
+#   1. Read the contract: agent-spec contract specs/<task>.spec
+#   2. Implement against the contract
+#   3. Verify: agent-spec lifecycle specs/<task>.spec --code . --format json
+#   4. Guard: agent-spec guard --spec-dir specs --code .
+#
+# Key Commands:
+#   agent-spec contract <spec>   - render Task Contract for planning
+#   agent-spec lifecycle <spec>  - full lint + verify pipeline
+#   agent-spec guard             - repo-wide pre-commit check
+#   agent-spec explain <spec>    - human-readable review summary

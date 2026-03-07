@@ -1,0 +1,39 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/spec-core",
+    "crates/spec-parser",
+    "crates/spec-lint",
+    "crates/spec-verify",
+    "crates/spec-report",
+    "crates/spec-gateway",
+    "crates/spec-cli",
+]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT"
+
+[workspace.dependencies]
+spec-core = { path = "crates/spec-core" }
+spec-parser = { path = "crates/spec-parser" }
+spec-lint = { path = "crates/spec-lint" }
+spec-verify = { path = "crates/spec-verify" }
+spec-report = { path = "crates/spec-report" }
+spec-gateway = { path = "crates/spec-gateway" }
+
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1.49", features = ["full"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"

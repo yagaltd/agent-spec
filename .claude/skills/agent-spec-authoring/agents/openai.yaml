@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Spec Authoring"
+  short_description: "Write and revise Task Contracts in the agent-spec DSL."
+  default_prompt: "Use $agent-spec-authoring to draft or update an agent-spec Task Contract."

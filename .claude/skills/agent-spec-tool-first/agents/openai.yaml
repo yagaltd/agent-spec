@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Spec Tooling"
+  short_description: "Run contract, lifecycle, and guard in Claude Code."
+  default_prompt: "Use $agent-spec-tool-first to execute the agent-spec workflow for this task."

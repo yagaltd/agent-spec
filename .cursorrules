@@ -1,0 +1,15 @@
+# agent-spec Integration for Cursor
+
+## Workflow
+
+1. Read the contract: `agent-spec contract specs/<task>.spec`
+2. Implement against the contract's Intent, Decisions, and Boundaries
+3. Verify: `agent-spec lifecycle specs/<task>.spec --code . --format json`
+4. Guard: `agent-spec guard --spec-dir specs --code .`
+
+## Key Commands
+
+- `agent-spec contract <spec>` — render the Task Contract for planning
+- `agent-spec lifecycle <spec> --code <dir>` — full lint + verify pipeline
+- `agent-spec guard --spec-dir specs --code .` — repo-wide pre-commit check
+- `agent-spec explain <spec>` — human-readable contract review summary

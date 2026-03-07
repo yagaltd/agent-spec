@@ -1,0 +1,14 @@
+[package]
+name = "spec-verify"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+spec-core.workspace = true
+spec-parser.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
