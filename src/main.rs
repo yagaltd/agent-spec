@@ -243,6 +243,14 @@ enum Commands {
         #[arg(long, default_value = "dot")]
         format: String,
     },
+    /// Validate a plan.md file for structural correctness
+    PlanCheck {
+        /// Path to plan.md
+        plan: PathBuf,
+        /// Output format: text, json
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
 }
 
 fn main() -> ExitCode {
@@ -344,6 +352,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             depth,
         } => cmd_plan(&spec, &code, &format, &depth),
         Commands::Graph { spec_dir, format } => cmd_graph(&spec_dir, &format),
+        Commands::PlanCheck { plan, format } => cmd_plan_check(&plan, &format),
     }
 }
 
@@ -2649,6 +2658,234 @@ fn compute_critical_path(
     path_edges.reverse();
     path_edges
 }
+
+// ── PlanCheck ──────────────────────────────────────────────────────
+
+/// Validate a plan.md file for structural correctness.
+/// Checks: dependency block parseable, no circular deps, valid bottleneck tags,
+/// consistent contract status, valid task references.
+struct PlanCheckResult {
+    valid: bool,
+    errors: Vec<String>,
+    warnings: Vec<String>,
+    tasks: Vec<String>,
+    dependency_edges: Vec<(String, String)>,
+}
+
+fn cmd_plan_check(plan_path: &Path, format: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let content = std::fs::read_to_string(plan_path)?;
+    let result = check_plan(&content);
+
+    match format {
+        "json" => {
+            let out = serde_json::json!({
+                "plan": plan_path.to_string_lossy(),
+                "valid": result.valid,
+                "errors": result.errors,
+                "warnings": result.warnings,
+                "tasks": result.tasks,
+                "dependencies": result.dependency_edges.iter()
+                    .map(|(from, to)| format!("{from} → {to}"))
+                    .collect::<Vec<_>>(),
+            });
+            println!("{}", serde_json::to_string_pretty(&out)?);
+        }
+        _ => {
+            println!("plan-check: {}", plan_path.display());
+            println!("{}", "=".repeat(40));
+            if result.valid {
+                println!("✅ Plan is valid");
+            } else {
+                println!("❌ Plan has errors");
+            }
+            for err in &result.errors {
+                println!("  ERROR: {err}");
+            }
+            for warn in &result.warnings {
+                println!("  WARN:  {warn}");
+            }
+            println!("Tasks: {}", result.tasks.len());
+            println!("Dependencies: {}", result.dependency_edges.len());
+        }
+    }
+
+    if result.valid {
+        Ok(())
+    } else {
+        Err("plan validation failed".into())
+    }
+}
+
+fn check_plan(content: &str) -> PlanCheckResult {
+    let mut errors = Vec::new();
+    let mut warnings = Vec::new();
+
+    // Parse dependencies block
+    let (deps, dep_errors) = parse_dependencies(content);
+    errors.extend(dep_errors);
+
+    // Extract task IDs from spec map
+    let tasks = extract_task_ids(content);
+
+    // Validate: all dependency references exist as tasks
+    for (from, to) in &deps {
+        if !tasks.contains(from) {
+            warnings.push(format!("Dependency source '{from}' not found in spec map"));
+        }
+        if !tasks.contains(to) {
+            errors.push(format!("Dependency target '{to}' not found in spec map — referenced by {from}"));
+        }
+    }
+
+    // Check for circular dependencies
+    if let Some(cycle) = detect_cycle(&deps, &tasks) {
+        errors.push(format!("Circular dependency detected: {}", cycle.join(" → ")));
+    }
+
+    // Validate bottleneck tags
+    let valid_bottlenecks = ["BLOCKING", "RISKY", "TIME-CONSUMING", "VERIFICATION-HEAVY", "STANDARD"];
+    let bottleneck_pattern = regex::Regex::new(r"\*\*Bottleneck\*\*:\s*(?:🔴|🟡|🔵|🟠|⚪)?\s*(\S+)").unwrap();
+    for cap in bottleneck_pattern.captures_iter(content) {
+        let tag = &cap[1];
+        // Strip emoji prefix if present
+        let tag_clean = tag.trim_start_matches(|c: char| !c.is_alphabetic());
+        if !valid_bottlenecks.iter().any(|vb| tag_clean.starts_with(vb)) {
+            warnings.push(format!("Unknown bottleneck tag: '{tag}' — expected one of: {}", valid_bottlenecks.join(", ")));
+        }
+    }
+
+    // Check contract status consistency
+    let written_pattern = regex::Regex::new(r"Contract status.*WRITTEN").unwrap();
+    let spec_pattern = regex::Regex::new(r"Contract.*specs/").unwrap();
+    let written_count = written_pattern.find_iter(content).count();
+    let spec_count = spec_pattern.find_iter(content).count();
+    if written_count > spec_count {
+        warnings.push(format!(
+            "{written_count} tasks marked WRITTEN but only {spec_count} have spec file paths"
+        ));
+    }
+
+    let valid = errors.is_empty();
+    PlanCheckResult {
+        valid,
+        errors,
+        warnings,
+        tasks,
+        dependency_edges: deps,
+    }
+}
+
+/// Parse the ## Dependencies block from plan.md
+fn parse_dependencies(content: &str) -> (Vec<(String, String)>, Vec<String>) {
+    let mut edges = Vec::new();
+    let mut errors = Vec::new();
+
+    // Find the Dependencies section
+    let in_deps = content.lines().skip_while(|line| !line.starts_with("## Dependencies"));
+    let dep_lines: Vec<&str> = in_deps
+        .take_while(|line| !line.starts_with("## ") || line.starts_with("## Dependencies"))
+        .collect();
+
+    let re = regex::Regex::new(r"^(TASK_\w+):\s*\[([^\]]*)\]").unwrap();
+
+    for line in &dep_lines {
+        if let Some(caps) = re.captures(line) {
+            let from = caps[1].to_string();
+            let deps_str = &caps[2];
+
+            if deps_str.trim().is_empty() {
+                continue; // No dependencies
+            }
+
+            for dep in deps_str.split(',') {
+                let dep = dep.trim().to_string();
+                if !dep.is_empty() {
+                    edges.push((from.clone(), dep));
+                }
+            }
+        }
+    }
+
+    (edges, errors)
+}
+
+/// Extract TASK IDs from the spec map
+fn extract_task_ids(content: &str) -> Vec<String> {
+    let re = regex::Regex::new(r"(?m)^###\s+(TASK\s+\d+)").unwrap();
+    let mut tasks = Vec::new();
+    for cap in re.captures_iter(content) {
+        tasks.push(cap[1].replace(' ', "_"));
+    }
+
+    // Also match TASK_N format in dependencies
+    let re2 = regex::Regex::new(r"(?m)^(TASK_\d+):").unwrap();
+    for cap in re2.captures_iter(content) {
+        let id = cap[1].to_string();
+        if !tasks.contains(&id) {
+            tasks.push(id);
+        }
+    }
+
+    tasks
+}
+
+/// Detect circular dependencies using DFS
+fn detect_cycle(edges: &[(String, String)], nodes: &[String]) -> Option<Vec<String>> {
+    use std::collections::{HashMap, HashSet};
+
+    let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+    for (from, to) in edges {
+        adj.entry(from.as_str()).or_default().push(to.as_str());
+    }
+
+    let mut visited = HashSet::new();
+    let mut in_stack = HashSet::new();
+    let mut path = Vec::new();
+
+    for node in nodes {
+        if let Some(cycle) = dfs_cycle(node.as_str(), &adj, &mut visited, &mut in_stack, &mut path) {
+            return Some(cycle);
+        }
+    }
+
+    None
+}
+
+fn dfs_cycle<'a>(
+    node: &'a str,
+    adj: &std::collections::HashMap<&str, Vec<&'a str>>,
+    visited: &mut std::collections::HashSet<&'a str>,
+    in_stack: &mut std::collections::HashSet<&'a str>,
+    path: &mut Vec<String>,
+) -> Option<Vec<String>> {
+    if in_stack.contains(node) {
+        // Found cycle — extract it from path
+        let cycle_start = path.iter().position(|p| p == node)?;
+        let mut cycle: Vec<String> = path[cycle_start..].to_vec();
+        cycle.push(node.to_string());
+        return Some(cycle);
+    }
+    if visited.contains(node) {
+        return None;
+    }
+
+    visited.insert(node);
+    in_stack.insert(node);
+    path.push(node.to_string());
+
+    if let Some(neighbors) = adj.get(node) {
+        for &next in neighbors {
+            if let Some(cycle) = dfs_cycle(next, adj, visited, in_stack, path) {
+                return Some(cycle);
+            }
+        }
+    }
+
+    in_stack.remove(node);
+    path.pop();
+    None
+}
+
 
 #[cfg(test)]
 #[allow(clippy::collapsible_if, clippy::expect_used, clippy::unwrap_used)]

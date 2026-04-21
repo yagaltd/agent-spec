@@ -1,7 +1,9 @@
 mod ai_verifier;
+mod bombadil_verifier;
 mod boundaries;
 mod complexity;
 mod structural;
+mod tdd_guard_verifier;
 mod test_verifier;
 
 use std::collections::HashSet;
@@ -12,9 +14,11 @@ use crate::spec_core::{
 };
 
 pub use ai_verifier::{AiBackend, AiVerifier, build_ai_request};
+pub use bombadil_verifier::BombadilVerifier;
 pub use boundaries::BoundariesVerifier;
 pub use complexity::ComplexityVerifier;
 pub use structural::StructuralVerifier;
+pub use tdd_guard_verifier::TddGuardVerifier;
 pub use test_verifier::TestVerifier;
 
 /// AI verifier mode.
