@@ -162,7 +162,7 @@ fn looks_like_property_test(scenario: &Scenario) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spec_core::{Step, TestSelector};
+    use crate::spec_core::Step;
 
     fn make_scenario(name: &str, steps: Vec<(&str, &str)>, test_sel: Option<&str>) -> Scenario {
         Scenario {
@@ -182,10 +182,7 @@ mod tests {
                     span: Span::line(1),
                 })
                 .collect(),
-            test_selector: test_sel.map(|s| TestSelector {
-                selector: s.into(),
-                span: Span::line(1),
-            }),
+            test_selector: test_sel.map(crate::spec_core::TestSelector::filter_only),
             tags: vec![],
             review: Default::default(),
             mode: Default::default(),

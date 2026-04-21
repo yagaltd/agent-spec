@@ -50,13 +50,23 @@ pub fn run_verification(
     ctx: &VerificationContext,
     verifiers: &[&dyn Verifier],
 ) -> SpecResult<VerificationReport> {
-    let mut all_results = Vec::new();
+    let mut all_results: Vec<ScenarioResult> = Vec::new();
     let mut covered_scenarios = HashSet::new();
 
     for verifier in verifiers {
         let results = verifier.verify(ctx)?;
         for result in results {
             if !covered_scenarios.insert(result.scenario_name.clone()) {
+                if result.verdict != Verdict::Skip {
+                    if let Some(existing) = all_results
+                        .iter_mut()
+                        .find(|existing| existing.scenario_name == result.scenario_name)
+                    {
+                        if existing.verdict == Verdict::Skip {
+                            *existing = result;
+                        }
+                    }
+                }
                 continue;
             }
             all_results.push(result);

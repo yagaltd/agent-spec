@@ -200,6 +200,8 @@ cargo run -q --bin agent-spec -- lifecycle specs/my-task.spec --code . --format 
 - verification
 - reporting
 
+By default, verification includes the built-in structural, boundary, test, `tdd-guard`, Bombadil, AI-stub, and complexity layers. Optional external tools are skipped when they are not installed or when no matching scenario exists.
+
 The run fails if:
 
 - lint emits an `error`
@@ -215,7 +217,18 @@ cargo run -q --bin agent-spec -- guard --spec-dir specs --code .
 
 `guard` is intended for pre-commit / CI use. It lints all specs in `specs/` and verifies them against the current change set.
 
-### 5. Contract Acceptance (replaces Code Review)
+### 5. Validate a pi-workflows plan
+
+`plan-check` validates a generated `plan.md` before execution:
+
+```bash
+cargo run -q --bin agent-spec -- plan-check plan.md
+cargo run -q --bin agent-spec -- plan-check plan.md --format json
+```
+
+It checks that dependency blocks are parseable, dependency targets exist, circular dependencies are absent, bottleneck tags are valid, and contract status is internally consistent. This is useful as a fast gate before a workflow runtime starts dispatching agents.
+
+### 6. Contract Acceptance (replaces Code Review)
 
 ```bash
 cargo run -q --bin agent-spec -- explain specs/my-task.spec --code . --format markdown
@@ -225,7 +238,7 @@ cargo run -q --bin agent-spec -- explain specs/my-task.spec --code . --format ma
 
 The reviewer judges two questions: (1) Is the Contract definition correct? (2) Did all verifications pass?
 
-### 6. Stamp for traceability
+### 7. Stamp for traceability
 
 ```bash
 cargo run -q --bin agent-spec -- stamp specs/my-task.spec --code . --dry-run
@@ -259,6 +272,57 @@ Scenario: Duplicate email is rejected
 ```
 
 This is the default quality rule for self-hosting and new task specs. The older `// @spec:` source annotation is still accepted as a compatibility fallback, but it should not be the primary authoring path.
+
+## Property And External Verification
+
+`agent-spec` can strengthen task contracts with optional property-test and external-verifier layers.
+
+### Property-test linting
+
+The linter warns when a scenario looks like a property-based test but the selector and step text do not bind it to a property framework. This catches contracts that say "for all inputs" but only point at example tests.
+
+Good property-oriented scenarios should make the property binding visible:
+
+```spec
+Scenario: Sorting is idempotent for generated arrays
+  Test: test_sort_idempotent_property
+  Given arbitrary arrays generated with proptest
+  When the array is sorted twice
+  Then the second sort returns the same sequence
+```
+
+### `tdd-guard` layer
+
+When `tdd-guard` is installed, lifecycle verification runs it as an external test-quality layer. It reports scenario-level failures when lint violations are related to the scenario's test selector.
+
+Use it explicitly with a layer selection:
+
+```bash
+cargo run -q --bin agent-spec -- lifecycle specs/my-task.spec --code . --layers lint,boundary,test,tdd-guard
+```
+
+If `tdd-guard` is not installed, the layer returns skipped results instead of failing the whole command. This keeps `agent-spec` usable as a standalone tool while allowing stricter hosts, such as pi-workflows, to install and require `tdd-guard`.
+
+### Bombadil layer
+
+When `bombadil` is installed, scenarios tagged `bombadil`, `web-ui`, or `webui` can be verified through Bombadil property tests:
+
+```spec
+Scenario: Login form preserves validation messages
+  tags: [web-ui, bombadil]
+  Test: login_form_validation_property
+  Given generated invalid login inputs
+  When the form validates the input
+  Then visible validation messages match the contract
+```
+
+Run it with:
+
+```bash
+cargo run -q --bin agent-spec -- lifecycle specs/my-task.spec --code . --layers lint,boundary,test,bombadil
+```
+
+Non-Bombadil scenarios are skipped by that layer. The normal test and boundary layers still cover ordinary task scenarios.
 
 ## Boundaries And Change Sets
 
@@ -374,6 +438,7 @@ For consistency, `verify` and `lifecycle` use the same precedence when `--change
 | `verify` | Verify code against a single spec |
 | `contract` | Render the Task Contract view |
 | `plan` | Generate plan context: Contract + Codebase scan + Task Sketch |
+| `plan-check` | Validate generated plan.md structure before workflow execution |
 | `lifecycle` | Run lint + verify + report (the main quality gate) |
 | `guard` | Lint all specs and verify against the current change set |
 | `explain` | Generate a human-readable contract review summary (Contract Acceptance) |
@@ -401,6 +466,7 @@ The current system is strongest when the contract can be checked by:
 - explicit tests selected from `Completion Criteria`
 - structural checks
 - boundary checks against an explicit or staged change set
+- optional property-test, `tdd-guard`, Bombadil, AI, and complexity verifier layers when the host project enables them
 
 More advanced verifier layers can still be added, but the current model is already sufficient for self-hosting `agent-spec` with task contracts.
 

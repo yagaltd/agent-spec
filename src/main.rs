@@ -2778,7 +2778,7 @@ fn check_plan(content: &str) -> PlanCheckResult {
 /// Parse the ## Dependencies block from plan.md
 fn parse_dependencies(content: &str) -> (Vec<(String, String)>, Vec<String>) {
     let mut edges = Vec::new();
-    let mut errors = Vec::new();
+    let errors = Vec::new();
 
     // Find the Dependencies section
     let in_deps = content.lines().skip_while(|line| !line.starts_with("## Dependencies"));

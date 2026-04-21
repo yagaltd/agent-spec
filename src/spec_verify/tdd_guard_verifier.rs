@@ -1,7 +1,5 @@
-use std::path::PathBuf;
-
 use crate::spec_core::{
-    Evidence, ResolvedSpec, ScenarioResult, SpecResult, StepVerdict, Verdict,
+    Evidence, ScenarioResult, SpecResult, StepVerdict, Verdict,
 };
 use crate::spec_verify::VerificationContext;
 use crate::spec_verify::Verifier;
