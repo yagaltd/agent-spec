@@ -1,9 +1,8 @@
 # agent-spec
 
-[![Crates.io](https://img.shields.io/crates/v/agent-spec.svg)](https://crates.io/crates/agent-spec)
-[![docs.rs](https://docs.rs/agent-spec/badge.svg)](https://docs.rs/agent-spec)
-[![CI](https://github.com/ZhangHanDong/agent-spec/actions/workflows/contract-guard.yml/badge.svg)](https://github.com/ZhangHanDong/agent-spec/actions/workflows/contract-guard.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+> **This is a fork of [ZhangHanDong/agent-spec](https://github.com/ZhangHanDong/agent-spec)** maintained by [yagaltd](https://github.com/yagaltd). It includes `tdd-guard` integration, `plan-check` validation, and pi-workflows compatibility.
 
 `agent-spec` is an AI-native BDD/spec verification tool for task execution.
 
@@ -117,7 +116,13 @@ For rewrite/parity work, the authoring path should explicitly bind observable be
 
 See [`examples/rewrite-parity-contract.spec`](examples/rewrite-parity-contract.spec) for a concrete parity-oriented contract.
 
-#### One-line install (CLI + skills)
+#### Install the CLI
+
+```bash
+cargo install --git https://github.com/yagaltd/agent-spec
+```
+
+#### One-line install (CLI + Claude Code skills)
 
 ```bash
 ./install-skills.sh
@@ -141,6 +146,16 @@ ln -s "$(pwd)/skills/agent-spec-tool-first" ~/.claude/skills/
 ln -s "$(pwd)/skills/agent-spec-authoring" ~/.claude/skills/
 ln -s "$(pwd)/skills/agent-spec-estimate" ~/.claude/skills/
 ```
+
+#### Install for pi-workflows
+
+agent-spec is a required dependency of [pi-workflows](https://github.com/yagaltd/pi-workflows). Install:
+
+```bash
+cargo install --git https://github.com/yagaltd/agent-spec
+```
+
+pi-workflows uses `agent-spec lifecycle` as the contract gate and `agent-spec guard` for repo-level boundary checks. The `--layers lint,boundary,test,tdd-guard` flag enables the full verification pipeline including test quality enforcement.
 
 #### Install for Codex
 
