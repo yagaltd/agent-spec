@@ -2,14 +2,8 @@
 #![deny(unsafe_code)]
 #![allow(dead_code)]
 
-mod spec_core;
-mod spec_gateway;
-mod spec_lint;
-mod spec_parser;
-mod spec_report;
-mod spec_verify;
-
-mod vcs;
+use agent_spec::spec_core;
+use agent_spec::vcs;
 
 use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
@@ -360,7 +354,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
 fn cmd_parse(files: &[PathBuf], format: &str) -> Result<(), Box<dyn std::error::Error>> {
     for file in files {
-        let doc = crate::spec_parser::parse_spec(file)?;
+        let doc = agent_spec::spec_parser::parse_spec(file)?;
         match format {
             "json" => println!("{}", serde_json::to_string_pretty(&doc)?),
             _ => {
@@ -372,26 +366,26 @@ fn cmd_parse(files: &[PathBuf], format: &str) -> Result<(), Box<dyn std::error::
                 println!("  sections: {}", doc.sections.len());
                 for section in &doc.sections {
                     match section {
-                        crate::spec_core::Section::Intent { content, .. } => {
+                        agent_spec::spec_core::Section::Intent { content, .. } => {
                             let preview: String = content.chars().take(80).collect();
                             println!("    - Intent: {preview}...");
                         }
-                        crate::spec_core::Section::Constraints { items, .. } => {
+                        agent_spec::spec_core::Section::Constraints { items, .. } => {
                             println!("    - Constraints: {} items", items.len());
                         }
-                        crate::spec_core::Section::Decisions { items, .. } => {
+                        agent_spec::spec_core::Section::Decisions { items, .. } => {
                             println!("    - Decisions: {} items", items.len());
                         }
-                        crate::spec_core::Section::Boundaries { items, .. } => {
+                        agent_spec::spec_core::Section::Boundaries { items, .. } => {
                             println!("    - Boundaries: {} items", items.len());
                         }
-                        crate::spec_core::Section::AcceptanceCriteria { scenarios, .. } => {
+                        agent_spec::spec_core::Section::AcceptanceCriteria { scenarios, .. } => {
                             println!("    - Acceptance Criteria: {} scenarios", scenarios.len());
                             for s in scenarios {
                                 println!("      - {}: {} steps", s.name, s.steps.len());
                             }
                         }
-                        crate::spec_core::Section::OutOfScope { items, .. } => {
+                        agent_spec::spec_core::Section::OutOfScope { items, .. } => {
                             println!("    - Out of Scope: {} items", items.len());
                         }
                     }
@@ -410,15 +404,15 @@ fn cmd_lint(
     format: &str,
     min_score: f64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let pipeline = crate::spec_lint::LintPipeline::with_defaults();
+    let pipeline = agent_spec::spec_lint::LintPipeline::with_defaults();
     let out_format = parse_output_format(format);
     let mut any_failed = false;
 
     for file in files {
-        let doc = crate::spec_parser::parse_spec(file)?;
+        let doc = agent_spec::spec_parser::parse_spec(file)?;
         let report = pipeline.run(&doc);
 
-        println!("{}", crate::spec_report::format_lint(&report, &out_format));
+        println!("{}", agent_spec::spec_report::format_lint(&report, &out_format));
 
         if report.has_errors() {
             eprintln!(
@@ -455,31 +449,31 @@ fn cmd_verify(
     ai_mode: &str,
     format: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let doc = crate::spec_parser::parse_spec(spec)?;
-    let resolved = crate::spec_parser::resolve_spec(doc, &[])?;
+    let doc = agent_spec::spec_parser::parse_spec(spec)?;
+    let resolved = agent_spec::spec_parser::resolve_spec(doc, &[])?;
     let change_scope = GitChangeScope::parse(change_scope)?;
     let ai_mode = parse_ai_mode(ai_mode)?;
     let effective_changes = resolve_command_change_paths(spec, code, change, change_scope)?;
 
-    let ctx = crate::spec_verify::VerificationContext {
+    let ctx = agent_spec::spec_verify::VerificationContext {
         code_paths: vec![code.to_path_buf()],
         change_paths: effective_changes,
         ai_mode,
         resolved_spec: resolved,
     };
 
-    let structural = crate::spec_verify::StructuralVerifier;
-    let boundaries = crate::spec_verify::BoundariesVerifier;
-    let test = crate::spec_verify::TestVerifier;
-    let ai = crate::spec_verify::AiVerifier::from_mode(ai_mode);
-    let verifiers: Vec<&dyn crate::spec_verify::Verifier> =
+    let structural = agent_spec::spec_verify::StructuralVerifier;
+    let boundaries = agent_spec::spec_verify::BoundariesVerifier;
+    let test = agent_spec::spec_verify::TestVerifier;
+    let ai = agent_spec::spec_verify::AiVerifier::from_mode(ai_mode);
+    let verifiers: Vec<&dyn agent_spec::spec_verify::Verifier> =
         vec![&structural, &boundaries, &test, &ai];
-    let report = crate::spec_verify::run_verification(&ctx, &verifiers)?;
+    let report = agent_spec::spec_verify::run_verification(&ctx, &verifiers)?;
 
     let out_format = parse_output_format(format);
     println!(
         "{}",
-        crate::spec_report::format_verification(&report, &out_format)
+        agent_spec::spec_report::format_verification(&report, &out_format)
     );
 
     let non_passing = report.summary.failed + report.summary.skipped + report.summary.uncertain;
@@ -531,7 +525,7 @@ fn cmd_lifecycle(
         None
     };
 
-    let gw = crate::spec_gateway::SpecGateway::load(spec)?;
+    let gw = agent_spec::spec_gateway::SpecGateway::load(spec)?;
     let change_scope = GitChangeScope::parse(change_scope)?;
     let ai_mode = parse_ai_mode(ai_mode)?;
     let effective_changes = resolve_command_change_paths(spec, code, change, change_scope)?;
@@ -594,7 +588,7 @@ fn cmd_lifecycle(
 
     // Apply dependency skips: if a scenario's prerequisite failed, skip it
     let mut verify_report = verify_report;
-    apply_dependency_skips(&mut verify_report, &gw.resolved().all_scenarios);
+    agent_spec::spec_gateway::apply_dependency_skips(&mut verify_report, &gw.resolved().all_scenarios);
 
     let passing = gw.is_passing_with_review_mode(&verify_report, review_mode);
 
@@ -603,31 +597,31 @@ fn cmd_lifecycle(
         .resolved()
         .all_scenarios
         .iter()
-        .filter(|s| s.mode == crate::spec_core::ScenarioMode::Optimize)
+        .filter(|s| s.mode == agent_spec::spec_core::ScenarioMode::Optimize)
         .filter(|s| {
             verify_report
                 .results
                 .iter()
-                .any(|r| r.scenario_name == s.name && r.verdict == crate::spec_core::Verdict::Pass)
+                .any(|r| r.scenario_name == s.name && r.verdict == agent_spec::spec_core::Verdict::Pass)
         })
         .map(|s| s.name.clone())
         .collect();
 
     // Stage 2b: If caller mode, emit pending AI requests for skipped scenarios
-    let ai_pending = if ai_mode == crate::spec_verify::AiMode::Caller {
+    let ai_pending = if ai_mode == agent_spec::spec_verify::AiMode::Caller {
         let skipped: Vec<_> = verify_report
             .results
             .iter()
-            .filter(|r| r.verdict == crate::spec_core::Verdict::Skip)
+            .filter(|r| r.verdict == agent_spec::spec_core::Verdict::Skip)
             .collect();
         if !skipped.is_empty() {
-            let ctx = crate::spec_verify::VerificationContext {
+            let ctx = agent_spec::spec_verify::VerificationContext {
                 code_paths: vec![code.to_path_buf()],
                 change_paths: effective_changes.clone(),
                 ai_mode,
                 resolved_spec: gw.resolved().clone(),
             };
-            let requests: Vec<crate::spec_core::AiRequest> = skipped
+            let requests: Vec<agent_spec::spec_core::AiRequest> = skipped
                 .iter()
                 .filter_map(|r| {
                     ctx.resolved_spec
@@ -635,7 +629,7 @@ fn cmd_lifecycle(
                         .iter()
                         .find(|s| s.name == r.scenario_name)
                         .map(|scenario| {
-                            crate::spec_verify::build_ai_request(
+                            agent_spec::spec_verify::build_ai_request(
                                 &ctx.resolved_spec.task.meta.name,
                                 scenario,
                                 &ctx,
@@ -731,10 +725,10 @@ fn cmd_lifecycle(
 }
 
 fn filter_report_by_layers(
-    report: crate::spec_core::VerificationReport,
+    report: agent_spec::spec_core::VerificationReport,
     layers: &[&str],
-) -> crate::spec_core::VerificationReport {
-    let results: Vec<crate::spec_core::ScenarioResult> = report
+) -> agent_spec::spec_core::VerificationReport {
+    let results: Vec<agent_spec::spec_core::ScenarioResult> = report
         .results
         .into_iter()
         .filter(|r| {
@@ -747,157 +741,13 @@ fn filter_report_by_layers(
             layer.is_empty() || layers.iter().any(|l| layer.contains(l))
         })
         .collect();
-    crate::spec_core::VerificationReport::from_results(report.spec_name, results)
-}
-
-/// Apply dependency skips: for each scenario with depends_on, if any dependency
-/// has a non-pass verdict, override this scenario's verdict to Skip.
-fn apply_dependency_skips(
-    report: &mut crate::spec_core::VerificationReport,
-    scenarios: &[crate::spec_core::Scenario],
-) {
-    use std::collections::HashMap;
-
-    // Build name -> verdict map from current results (owned keys to avoid borrow conflict)
-    let verdict_map: HashMap<String, crate::spec_core::Verdict> = report
-        .results
-        .iter()
-        .map(|r| (r.scenario_name.clone(), r.verdict))
-        .collect();
-
-    // Build name -> depends_on map from scenarios (owned keys)
-    let deps_map: HashMap<String, Vec<String>> = scenarios
-        .iter()
-        .filter(|s| !s.depends_on.is_empty())
-        .map(|s| (s.name.clone(), s.depends_on.clone()))
-        .collect();
-
-    // For each result, check if any dependency failed
-    for result in &mut report.results {
-        if let Some(deps) = deps_map.get(&result.scenario_name) {
-            let failed_deps: Vec<&str> = deps
-                .iter()
-                .filter(|dep| {
-                    verdict_map
-                        .get(dep.as_str())
-                        .is_none_or(|v| *v != crate::spec_core::Verdict::Pass)
-                })
-                .map(|d| d.as_str())
-                .collect();
-
-            if !failed_deps.is_empty() {
-                result.verdict = crate::spec_core::Verdict::Skip;
-                let dep_names = failed_deps.join(", ");
-                result
-                    .evidence
-                    .push(crate::spec_core::Evidence::PatternMatch {
-                        pattern: "dependency-skip".into(),
-                        matched: true,
-                        locations: vec![format!("dependency failed: {dep_names}")],
-                    });
-            }
-        }
-    }
-
-    // Recompute summary
-    let total = report.results.len();
-    let passed = report
-        .results
-        .iter()
-        .filter(|r| r.verdict == crate::spec_core::Verdict::Pass)
-        .count();
-    let failed = report
-        .results
-        .iter()
-        .filter(|r| r.verdict == crate::spec_core::Verdict::Fail)
-        .count();
-    let skipped = report
-        .results
-        .iter()
-        .filter(|r| r.verdict == crate::spec_core::Verdict::Skip)
-        .count();
-    let uncertain = report
-        .results
-        .iter()
-        .filter(|r| r.verdict == crate::spec_core::Verdict::Uncertain)
-        .count();
-    let pending_review = report
-        .results
-        .iter()
-        .filter(|r| r.verdict == crate::spec_core::Verdict::PendingReview)
-        .count();
-    report.summary = crate::spec_core::VerificationSummary {
-        total,
-        passed,
-        failed,
-        skipped,
-        uncertain,
-        pending_review,
-    };
-}
-
-/// Sort scenarios by topological order based on depends_on.
-/// Returns indices in execution order. Scenarios without dependencies preserve
-/// their original order relative to each other.
-#[allow(dead_code)]
-fn topological_sort_scenarios(scenarios: &[crate::spec_core::Scenario]) -> Vec<usize> {
-    use std::collections::{HashMap, VecDeque};
-
-    let name_to_idx: HashMap<&str, usize> = scenarios
-        .iter()
-        .enumerate()
-        .map(|(i, s)| (s.name.as_str(), i))
-        .collect();
-
-    // Build in-degree and adjacency
-    let mut in_degree = vec![0usize; scenarios.len()];
-    let mut dependents: Vec<Vec<usize>> = vec![vec![]; scenarios.len()];
-
-    for (i, s) in scenarios.iter().enumerate() {
-        for dep in &s.depends_on {
-            if let Some(&dep_idx) = name_to_idx.get(dep.as_str()) {
-                in_degree[i] += 1;
-                dependents[dep_idx].push(i);
-            }
-        }
-    }
-
-    // Kahn's algorithm with stable ordering
-    let mut queue: VecDeque<usize> = VecDeque::new();
-    for (i, &deg) in in_degree.iter().enumerate() {
-        if deg == 0 {
-            queue.push_back(i);
-        }
-    }
-
-    let mut order = Vec::with_capacity(scenarios.len());
-    while let Some(idx) = queue.pop_front() {
-        order.push(idx);
-        let mut next: Vec<usize> = dependents[idx]
-            .iter()
-            .filter_map(|&dep_idx| {
-                in_degree[dep_idx] -= 1;
-                if in_degree[dep_idx] == 0 {
-                    Some(dep_idx)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        // Sort to preserve original order among siblings
-        next.sort();
-        for n in next {
-            queue.push_back(n);
-        }
-    }
-
-    order
+    agent_spec::spec_core::VerificationReport::from_results(report.spec_name, results)
 }
 
 // ── Brief (agent prompt generation) ─────────────────────────────
 
 fn cmd_brief(spec: &Path, format: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let gw = crate::spec_gateway::SpecGateway::load(spec)?;
+    let gw = agent_spec::spec_gateway::SpecGateway::load(spec)?;
     eprintln!("warning: `agent-spec brief` is a compatibility alias; prefer `agent-spec contract`");
     print!("{}", render_brief_output(&gw, format)?);
 
@@ -905,7 +755,7 @@ fn cmd_brief(spec: &Path, format: &str) -> Result<(), Box<dyn std::error::Error>
 }
 
 fn cmd_contract(spec: &Path, format: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let gw = crate::spec_gateway::SpecGateway::load(spec)?;
+    let gw = agent_spec::spec_gateway::SpecGateway::load(spec)?;
     print!("{}", render_contract_output(&gw, format)?);
 
     Ok(())
@@ -951,7 +801,7 @@ fn cmd_guard(
     let mut errors = Vec::new();
 
     for spec_file in &spec_files {
-        let gw = match crate::spec_gateway::SpecGateway::load(spec_file) {
+        let gw = match agent_spec::spec_gateway::SpecGateway::load(spec_file) {
             Ok(gw) => gw,
             Err(e) => {
                 errors.push(format!("{}: parse error: {e}", spec_file.display()));
@@ -1259,11 +1109,11 @@ fn append_unique_paths(target: &mut Vec<PathBuf>, extra: Vec<PathBuf>) {
     }
 }
 
-fn parse_ai_mode(input: &str) -> Result<crate::spec_verify::AiMode, Box<dyn std::error::Error>> {
+fn parse_ai_mode(input: &str) -> Result<agent_spec::spec_verify::AiMode, Box<dyn std::error::Error>> {
     match input {
-        "off" => Ok(crate::spec_verify::AiMode::Off),
-        "stub" => Ok(crate::spec_verify::AiMode::Stub),
-        "caller" => Ok(crate::spec_verify::AiMode::Caller),
+        "off" => Ok(agent_spec::spec_verify::AiMode::Off),
+        "stub" => Ok(agent_spec::spec_verify::AiMode::Stub),
+        "caller" => Ok(agent_spec::spec_verify::AiMode::Caller),
         other => Err(format!(
             "unsupported --ai-mode `{other}` (expected `off`, `stub`, or `caller`)"
         )
@@ -1279,11 +1129,11 @@ fn cmd_explain(
     format: &str,
     history: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let gw = crate::spec_gateway::SpecGateway::load(spec)?;
+    let gw = agent_spec::spec_gateway::SpecGateway::load(spec)?;
     let contract = gw.plan();
     let report = gw.verify(code)?;
 
-    let input = crate::spec_report::ExplainInput {
+    let input = agent_spec::spec_report::ExplainInput {
         name: contract.name.clone(),
         intent: contract.intent.clone(),
         must: contract.must.clone(),
@@ -1297,7 +1147,7 @@ fn cmd_explain(
     let out_format = parse_output_format(format);
     print!(
         "{}",
-        crate::spec_report::format_explain(&input, &report, &out_format)
+        agent_spec::spec_report::format_explain(&input, &report, &out_format)
     );
 
     // Show history from run logs if requested
@@ -1319,7 +1169,7 @@ fn cmd_explain(
 fn build_stamp_trailers(
     name: &str,
     passing: bool,
-    summary: &crate::spec_core::VerificationSummary,
+    summary: &agent_spec::spec_core::VerificationSummary,
     vcs_ctx: Option<&vcs::VcsContext>,
 ) -> Vec<String> {
     let mut trailers = vec![
@@ -1347,7 +1197,7 @@ fn cmd_stamp(spec: &Path, code: &Path, dry_run: bool) -> Result<(), Box<dyn std:
         );
     }
 
-    let gw = crate::spec_gateway::SpecGateway::load(spec)?;
+    let gw = agent_spec::spec_gateway::SpecGateway::load(spec)?;
     let contract = gw.plan();
     let report = gw.verify(code)?;
     let passing = gw.is_passing(&report);
@@ -2076,7 +1926,7 @@ Scenario: cold start follows fallback order
     )
 }
 
-fn format_non_passing_summary(summary: &crate::spec_core::VerificationSummary) -> String {
+fn format_non_passing_summary(summary: &agent_spec::spec_core::VerificationSummary) -> String {
     format!(
         "verification not passing: {} failed, {} skipped, {} uncertain, {} pending_review",
         summary.failed, summary.skipped, summary.uncertain, summary.pending_review,
@@ -2246,31 +2096,31 @@ Scenario: remote failure returns a stable error
     )
 }
 
-fn format_level(level: crate::spec_core::SpecLevel) -> &'static str {
+fn format_level(level: agent_spec::spec_core::SpecLevel) -> &'static str {
     match level {
-        crate::spec_core::SpecLevel::Org => "org",
-        crate::spec_core::SpecLevel::Project => "project",
-        crate::spec_core::SpecLevel::Task => "task",
+        agent_spec::spec_core::SpecLevel::Org => "org",
+        agent_spec::spec_core::SpecLevel::Project => "project",
+        agent_spec::spec_core::SpecLevel::Task => "task",
     }
 }
 
-fn parse_output_format(s: &str) -> crate::spec_report::OutputFormat {
+fn parse_output_format(s: &str) -> agent_spec::spec_report::OutputFormat {
     match s {
-        "json" => crate::spec_report::OutputFormat::Json,
-        "md" | "markdown" => crate::spec_report::OutputFormat::Markdown,
-        _ => crate::spec_report::OutputFormat::Text,
+        "json" => agent_spec::spec_report::OutputFormat::Json,
+        "md" | "markdown" => agent_spec::spec_report::OutputFormat::Markdown,
+        _ => agent_spec::spec_report::OutputFormat::Text,
     }
 }
 
 fn render_brief_output(
-    gw: &crate::spec_gateway::SpecGateway,
+    gw: &agent_spec::spec_gateway::SpecGateway,
     format: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     render_contract_output(gw, format)
 }
 
 fn render_contract_output(
-    gw: &crate::spec_gateway::SpecGateway,
+    gw: &agent_spec::spec_gateway::SpecGateway,
     format: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let contract = gw.plan();
@@ -2289,7 +2139,7 @@ fn render_contract_output(
 struct ScenarioAiDecision {
     pub scenario_name: String,
     #[serde(flatten)]
-    pub decision: crate::spec_core::AiDecision,
+    pub decision: agent_spec::spec_core::AiDecision,
 }
 
 fn cmd_resolve_ai(
@@ -2299,8 +2149,8 @@ fn cmd_resolve_ai(
     format: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Load spec and run mechanical verification (caller mode skips AI internally)
-    let gw = crate::spec_gateway::SpecGateway::load(spec)?;
-    let verify_report = gw.verify_with_ai_mode(code, crate::spec_verify::AiMode::Caller)?;
+    let gw = agent_spec::spec_gateway::SpecGateway::load(spec)?;
+    let verify_report = gw.verify_with_ai_mode(code, agent_spec::spec_verify::AiMode::Caller)?;
 
     // 2. Read external AI decisions
     let decisions_json = std::fs::read_to_string(decisions_path)?;
@@ -2317,13 +2167,13 @@ fn cmd_resolve_ai(
             result.step_results = result
                 .step_results
                 .iter()
-                .map(|step| crate::spec_core::StepVerdict {
+                .map(|step| agent_spec::spec_core::StepVerdict {
                     step_text: step.step_text.clone(),
                     verdict: decision.decision.verdict,
                     reason: decision.decision.reasoning.clone(),
                 })
                 .collect();
-            result.evidence = vec![crate::spec_core::Evidence::AiAnalysis {
+            result.evidence = vec![agent_spec::spec_core::Evidence::AiAnalysis {
                 model: decision.decision.model.clone(),
                 confidence: decision.decision.confidence,
                 reasoning: decision.decision.reasoning.clone(),
@@ -2332,7 +2182,7 @@ fn cmd_resolve_ai(
     }
 
     let merged_report =
-        crate::spec_core::VerificationReport::from_results(verify_report.spec_name, merged_results);
+        agent_spec::spec_core::VerificationReport::from_results(verify_report.spec_name, merged_results);
 
     let passing = gw.is_passing(&merged_report);
 
@@ -2373,11 +2223,11 @@ fn cmd_plan(
     format: &str,
     depth: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let gw = crate::spec_gateway::SpecGateway::load(spec)?;
+    let gw = agent_spec::spec_gateway::SpecGateway::load(spec)?;
     let contract = gw.plan();
-    let scan_depth = crate::spec_gateway::plan::ScanDepth::parse(depth);
+    let scan_depth = agent_spec::spec_gateway::plan::ScanDepth::parse(depth);
 
-    let ctx = crate::spec_gateway::plan::build_plan_context(
+    let ctx = agent_spec::spec_gateway::plan::build_plan_context(
         &contract,
         gw.resolved(),
         code,
@@ -2390,9 +2240,9 @@ fn cmd_plan(
     }
 
     let output = match format {
-        "json" => crate::spec_gateway::plan::format_plan_json(&ctx),
-        "prompt" => crate::spec_gateway::plan::format_plan_prompt(&ctx),
-        _ => crate::spec_gateway::plan::format_plan_text(&ctx),
+        "json" => agent_spec::spec_gateway::plan::format_plan_json(&ctx),
+        "prompt" => agent_spec::spec_gateway::plan::format_plan_prompt(&ctx),
+        _ => agent_spec::spec_gateway::plan::format_plan_text(&ctx),
     };
 
     print!("{output}");
@@ -2425,7 +2275,7 @@ fn cmd_graph(spec_dir: &Path, format: &str) -> Result<(), Box<dyn std::error::Er
     let mut stem_to_idx: HashMap<String, usize> = HashMap::new();
 
     for file in &spec_files {
-        let doc = match crate::spec_parser::parse_spec(file) {
+        let doc = match agent_spec::spec_parser::parse_spec(file) {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("warning: skipping {}: {e}", file.display());
@@ -2936,7 +2786,7 @@ Scenario: Contract alias
 
     #[test]
     fn test_brief_output_matches_contract_output() {
-        let gw = crate::spec_gateway::SpecGateway::from_input(SAMPLE).unwrap();
+        let gw = agent_spec::spec_gateway::SpecGateway::from_input(SAMPLE).unwrap();
         let brief = render_brief_output(&gw, "text").unwrap();
         let contract = render_contract_output(&gw, "text").unwrap();
 
@@ -3078,7 +2928,7 @@ Scenario: Contract alias
     fn test_parse_ai_mode_accepts_stub() {
         assert_eq!(
             parse_ai_mode("stub").unwrap(),
-            crate::spec_verify::AiMode::Stub
+            agent_spec::spec_verify::AiMode::Stub
         );
     }
 
@@ -3244,12 +3094,12 @@ Scenario: Contract alias
             generate_rewrite_parity_template_en("Rewrite Template"),
             generate_rewrite_parity_template_both("Bilingual Rewrite"),
         ] {
-            let doc = crate::spec_parser::parse_spec_from_str(&lang).unwrap();
+            let doc = agent_spec::spec_parser::parse_spec_from_str(&lang).unwrap();
             let scenario_count = doc
                 .sections
                 .iter()
                 .filter_map(|section| match section {
-                    crate::spec_core::Section::AcceptanceCriteria { scenarios, .. } => {
+                    agent_spec::spec_core::Section::AcceptanceCriteria { scenarios, .. } => {
                         Some(scenarios.len())
                     }
                     _ => None,
@@ -3292,7 +3142,7 @@ Scenario: Contract alias
         )
         .unwrap();
         let content = fs::read_to_string(dir.join("cli-parity-contract.spec.md")).unwrap();
-        let parsed = crate::spec_parser::parse_spec_from_str(&content).unwrap();
+        let parsed = agent_spec::spec_parser::parse_spec_from_str(&content).unwrap();
 
         assert!(content.contains("tags: [rewrite, parity]"));
         assert!(content.contains("command x output mode"));
@@ -3300,7 +3150,7 @@ Scenario: Contract alias
         assert!(content.contains("Targets:"));
         assert!(parsed.sections.iter().any(|section| matches!(
             section,
-            crate::spec_core::Section::AcceptanceCriteria { .. }
+            agent_spec::spec_core::Section::AcceptanceCriteria { .. }
         )));
 
         let cli = super::Cli::parse_from([
@@ -3357,7 +3207,7 @@ Scenario: Contract alias
 
     #[test]
     fn test_contract_output_preserves_step_tables_and_test_selectors() {
-        let gw = crate::spec_gateway::SpecGateway::from_input(
+        let gw = agent_spec::spec_gateway::SpecGateway::from_input(
             r#"spec: task
 name: "Contract Output"
 ---
@@ -3423,7 +3273,7 @@ Scenario: verification metadata stays visible
   Then metadata stays visible
 "#;
 
-        let gw = crate::spec_gateway::SpecGateway::from_input(input).unwrap();
+        let gw = agent_spec::spec_gateway::SpecGateway::from_input(input).unwrap();
         let json = gw.ast_json();
         let contract = render_contract_output(&gw, "text").unwrap();
 
@@ -3509,7 +3359,7 @@ Scenario: verification metadata stays visible
 
     #[test]
     fn test_explain_command_renders_contract_review_summary() {
-        let input = crate::spec_report::ExplainInput {
+        let input = agent_spec::spec_report::ExplainInput {
             name: "Test Contract".into(),
             intent: "Verify the explain command renders a useful summary".into(),
             must: vec!["Run all scenarios".into()],
@@ -3519,16 +3369,16 @@ Scenario: verification metadata stays visible
             forbidden: vec!["Do not modify parser".into()],
             out_of_scope: vec!["AI verification".into()],
         };
-        let report = crate::spec_core::VerificationReport {
+        let report = agent_spec::spec_core::VerificationReport {
             spec_name: "test".into(),
-            results: vec![crate::spec_core::ScenarioResult {
+            results: vec![agent_spec::spec_core::ScenarioResult {
                 scenario_name: "happy path".into(),
-                verdict: crate::spec_core::Verdict::Pass,
+                verdict: agent_spec::spec_core::Verdict::Pass,
                 step_results: vec![],
                 evidence: vec![],
                 duration_ms: 5,
             }],
-            summary: crate::spec_core::VerificationSummary {
+            summary: agent_spec::spec_core::VerificationSummary {
                 total: 1,
                 passed: 1,
                 failed: 0,
@@ -3538,10 +3388,10 @@ Scenario: verification metadata stays visible
             },
         };
 
-        let text = crate::spec_report::format_explain(
+        let text = agent_spec::spec_report::format_explain(
             &input,
             &report,
-            &crate::spec_report::OutputFormat::Text,
+            &agent_spec::spec_report::OutputFormat::Text,
         );
 
         assert!(text.contains("Intent"));
@@ -3555,7 +3405,7 @@ Scenario: verification metadata stays visible
 
     #[test]
     fn test_explain_markdown_output_is_suitable_for_pr_description() {
-        let input = crate::spec_report::ExplainInput {
+        let input = agent_spec::spec_report::ExplainInput {
             name: "PR Contract".into(),
             intent: "Generate markdown suitable for a PR description".into(),
             must: vec![],
@@ -3565,25 +3415,25 @@ Scenario: verification metadata stays visible
             forbidden: vec!["Do not copy raw JSON".into()],
             out_of_scope: vec!["HTML output".into()],
         };
-        let report = crate::spec_core::VerificationReport {
+        let report = agent_spec::spec_core::VerificationReport {
             spec_name: "pr".into(),
             results: vec![
-                crate::spec_core::ScenarioResult {
+                agent_spec::spec_core::ScenarioResult {
                     scenario_name: "scenario A".into(),
-                    verdict: crate::spec_core::Verdict::Pass,
+                    verdict: agent_spec::spec_core::Verdict::Pass,
                     step_results: vec![],
                     evidence: vec![],
                     duration_ms: 3,
                 },
-                crate::spec_core::ScenarioResult {
+                agent_spec::spec_core::ScenarioResult {
                     scenario_name: "scenario B".into(),
-                    verdict: crate::spec_core::Verdict::Fail,
+                    verdict: agent_spec::spec_core::Verdict::Fail,
                     step_results: vec![],
                     evidence: vec![],
                     duration_ms: 2,
                 },
             ],
-            summary: crate::spec_core::VerificationSummary {
+            summary: agent_spec::spec_core::VerificationSummary {
                 total: 2,
                 passed: 1,
                 failed: 1,
@@ -3593,10 +3443,10 @@ Scenario: verification metadata stays visible
             },
         };
 
-        let md = crate::spec_report::format_explain(
+        let md = agent_spec::spec_report::format_explain(
             &input,
             &report,
-            &crate::spec_report::OutputFormat::Markdown,
+            &agent_spec::spec_report::OutputFormat::Markdown,
         );
 
         assert!(md.contains("## Intent"));
@@ -3608,7 +3458,7 @@ Scenario: verification metadata stays visible
 
     #[test]
     fn test_stamp_dry_run_outputs_trailers_without_rewriting_history() {
-        let summary = crate::spec_core::VerificationSummary {
+        let summary = agent_spec::spec_core::VerificationSummary {
             total: 3,
             passed: 2,
             failed: 1,
@@ -3900,32 +3750,32 @@ Scenario: verification metadata stays visible
         }
 
         // Test filter_report_by_layers preserves matching and removes non-matching
-        let report = crate::spec_core::VerificationReport {
+        let report = agent_spec::spec_core::VerificationReport {
             spec_name: "test".into(),
             results: vec![
-                crate::spec_core::ScenarioResult {
+                agent_spec::spec_core::ScenarioResult {
                     scenario_name: "[boundary] allowed paths".into(),
-                    verdict: crate::spec_core::Verdict::Pass,
+                    verdict: agent_spec::spec_core::Verdict::Pass,
                     step_results: vec![],
                     evidence: vec![],
                     duration_ms: 1,
                 },
-                crate::spec_core::ScenarioResult {
+                agent_spec::spec_core::ScenarioResult {
                     scenario_name: "[test] happy path".into(),
-                    verdict: crate::spec_core::Verdict::Pass,
+                    verdict: agent_spec::spec_core::Verdict::Pass,
                     step_results: vec![],
                     evidence: vec![],
                     duration_ms: 2,
                 },
-                crate::spec_core::ScenarioResult {
+                agent_spec::spec_core::ScenarioResult {
                     scenario_name: "[ai] uncertain scenario".into(),
-                    verdict: crate::spec_core::Verdict::Uncertain,
+                    verdict: agent_spec::spec_core::Verdict::Uncertain,
                     step_results: vec![],
                     evidence: vec![],
                     duration_ms: 3,
                 },
             ],
-            summary: crate::spec_core::VerificationSummary {
+            summary: agent_spec::spec_core::VerificationSummary {
                 total: 3,
                 passed: 2,
                 failed: 0,
@@ -3991,7 +3841,7 @@ Scenario: verification metadata stays visible
 
     #[test]
     fn test_stamp_trailers_include_jj_change_id() {
-        let summary = crate::spec_core::VerificationSummary {
+        let summary = agent_spec::spec_core::VerificationSummary {
             total: 3,
             passed: 3,
             failed: 0,
@@ -4019,7 +3869,7 @@ Scenario: verification metadata stays visible
 
     #[test]
     fn test_stamp_trailers_omit_change_id_for_git() {
-        let summary = crate::spec_core::VerificationSummary {
+        let summary = agent_spec::spec_core::VerificationSummary {
             total: 3,
             passed: 3,
             failed: 0,
@@ -4194,7 +4044,7 @@ Scenario: verification metadata stays visible
     fn test_parse_ai_mode_accepts_caller() {
         assert_eq!(
             parse_ai_mode("caller").unwrap(),
-            crate::spec_verify::AiMode::Caller
+            agent_spec::spec_verify::AiMode::Caller
         );
     }
 
@@ -4230,10 +4080,10 @@ Scenario: verification metadata stays visible
     fn test_scenario_ai_decision_serialization_roundtrip() {
         let decision = super::ScenarioAiDecision {
             scenario_name: "AI 场景".into(),
-            decision: crate::spec_core::AiDecision {
+            decision: agent_spec::spec_core::AiDecision {
                 model: "claude-agent".into(),
                 confidence: 0.92,
-                verdict: crate::spec_core::Verdict::Pass,
+                verdict: agent_spec::spec_core::Verdict::Pass,
                 reasoning: "All steps verified by agent analysis".into(),
             },
         };
@@ -4245,7 +4095,7 @@ Scenario: verification metadata stays visible
 
         let parsed: super::ScenarioAiDecision = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.scenario_name, "AI 场景");
-        assert_eq!(parsed.decision.verdict, crate::spec_core::Verdict::Pass);
+        assert_eq!(parsed.decision.verdict, agent_spec::spec_core::Verdict::Pass);
         assert_eq!(parsed.decision.model, "claude-agent");
     }
 
@@ -4334,15 +4184,15 @@ Scenario: pass
   When action
   Then result
 "#;
-        let doc = crate::spec_parser::parse_spec_from_str(input).unwrap();
+        let doc = agent_spec::spec_parser::parse_spec_from_str(input).unwrap();
         let boundaries_section = doc.sections.iter().find_map(|s| match s {
-            crate::spec_core::Section::Boundaries { items, .. } => Some(items),
+            agent_spec::spec_core::Section::Boundaries { items, .. } => Some(items),
             _ => None,
         });
         let items = boundaries_section.unwrap();
         let allowed: Vec<_> = items
             .iter()
-            .filter(|b| b.category == crate::spec_core::BoundaryCategory::Allow)
+            .filter(|b| b.category == agent_spec::spec_core::BoundaryCategory::Allow)
             .collect();
         // Both paths should be extracted as allowed boundaries
         assert!(allowed.iter().any(|b| b.text == "specs/task.spec.md"));
@@ -4383,12 +4233,12 @@ Scenario: pass
 
     fn make_scenario_result(
         name: &str,
-        verdict: crate::spec_core::Verdict,
-    ) -> crate::spec_core::ScenarioResult {
-        crate::spec_core::ScenarioResult {
+        verdict: agent_spec::spec_core::Verdict,
+    ) -> agent_spec::spec_core::ScenarioResult {
+        agent_spec::spec_core::ScenarioResult {
             scenario_name: name.to_owned(),
             verdict,
-            step_results: vec![crate::spec_core::StepVerdict {
+            step_results: vec![agent_spec::spec_core::StepVerdict {
                 step_text: format!("step for {name}"),
                 verdict,
                 reason: "test".into(),
@@ -4403,30 +4253,30 @@ Scenario: pass
         let mut scenarios = std::collections::HashMap::new();
         scenarios.insert(
             "场景 A".to_owned(),
-            crate::spec_core::CheckpointEntry {
-                verdict: crate::spec_core::Verdict::Pass,
+            agent_spec::spec_core::CheckpointEntry {
+                verdict: agent_spec::spec_core::Verdict::Pass,
                 vcs_ref: Some("abc123".into()),
             },
         );
         scenarios.insert(
             "场景 B".to_owned(),
-            crate::spec_core::CheckpointEntry {
-                verdict: crate::spec_core::Verdict::Fail,
+            agent_spec::spec_core::CheckpointEntry {
+                verdict: agent_spec::spec_core::Verdict::Fail,
                 vcs_ref: Some("abc123".into()),
             },
         );
-        let checkpoint = crate::spec_core::Checkpoint {
+        let checkpoint = agent_spec::spec_core::Checkpoint {
             spec_name: "测试".into(),
             timestamp: 1000,
             vcs_ref: Some("abc123".into()),
             scenarios,
         };
 
-        let report = crate::spec_core::VerificationReport::from_results(
+        let report = agent_spec::spec_core::VerificationReport::from_results(
             "测试".into(),
             vec![
-                make_scenario_result("场景 A", crate::spec_core::Verdict::Skip),
-                make_scenario_result("场景 B", crate::spec_core::Verdict::Fail),
+                make_scenario_result("场景 A", agent_spec::spec_core::Verdict::Skip),
+                make_scenario_result("场景 B", agent_spec::spec_core::Verdict::Fail),
             ],
         );
 
@@ -4437,9 +4287,9 @@ Scenario: pass
             .iter()
             .find(|r| r.scenario_name == "场景 A")
             .unwrap();
-        assert_eq!(a.verdict, crate::spec_core::Verdict::Pass);
+        assert_eq!(a.verdict, agent_spec::spec_core::Verdict::Pass);
         let has_checkpoint_evidence = a.evidence.iter().any(|e| match e {
-            crate::spec_core::Evidence::PatternMatch { pattern, .. } => {
+            agent_spec::spec_core::Evidence::PatternMatch { pattern, .. } => {
                 pattern == "checkpoint:incremental"
             }
             _ => false,
@@ -4452,7 +4302,7 @@ Scenario: pass
             .iter()
             .find(|r| r.scenario_name == "场景 B")
             .unwrap();
-        assert_eq!(b.verdict, crate::spec_core::Verdict::Fail);
+        assert_eq!(b.verdict, agent_spec::spec_core::Verdict::Fail);
 
         assert_eq!(merged.summary.passed, 1);
         assert_eq!(merged.summary.failed, 1);
@@ -4463,23 +4313,23 @@ Scenario: pass
         let mut scenarios = std::collections::HashMap::new();
         scenarios.insert(
             "场景 A".to_owned(),
-            crate::spec_core::CheckpointEntry {
-                verdict: crate::spec_core::Verdict::Pass,
+            agent_spec::spec_core::CheckpointEntry {
+                verdict: agent_spec::spec_core::Verdict::Pass,
                 vcs_ref: Some("abc123".into()),
             },
         );
-        let checkpoint = crate::spec_core::Checkpoint {
+        let checkpoint = agent_spec::spec_core::Checkpoint {
             spec_name: "测试".into(),
             timestamp: 1000,
             vcs_ref: Some("abc123".into()),
             scenarios,
         };
 
-        let report = crate::spec_core::VerificationReport::from_results(
+        let report = agent_spec::spec_core::VerificationReport::from_results(
             "测试".into(),
             vec![make_scenario_result(
                 "场景 A",
-                crate::spec_core::Verdict::Fail,
+                agent_spec::spec_core::Verdict::Fail,
             )],
         );
 
@@ -4490,9 +4340,9 @@ Scenario: pass
             .iter()
             .find(|r| r.scenario_name == "场景 A")
             .unwrap();
-        assert_eq!(a.verdict, crate::spec_core::Verdict::Fail);
+        assert_eq!(a.verdict, agent_spec::spec_core::Verdict::Fail);
         let has_regression = a.evidence.iter().any(|e| match e {
-            crate::spec_core::Evidence::PatternMatch {
+            agent_spec::spec_core::Evidence::PatternMatch {
                 pattern, locations, ..
             } => {
                 pattern == "checkpoint:regression"
@@ -4530,12 +4380,12 @@ Scenario: pass
     fn test_checkpoint_roundtrip_serialization() {
         let dir = make_temp_dir("checkpoint-roundtrip");
 
-        let report = crate::spec_core::VerificationReport::from_results(
+        let report = agent_spec::spec_core::VerificationReport::from_results(
             "序列化测试".into(),
             vec![
-                make_scenario_result("场景 A", crate::spec_core::Verdict::Pass),
-                make_scenario_result("场景 B", crate::spec_core::Verdict::Fail),
-                make_scenario_result("场景 C", crate::spec_core::Verdict::Skip),
+                make_scenario_result("场景 A", agent_spec::spec_core::Verdict::Pass),
+                make_scenario_result("场景 B", agent_spec::spec_core::Verdict::Fail),
+                make_scenario_result("场景 C", agent_spec::spec_core::Verdict::Skip),
             ],
         );
 
@@ -4553,14 +4403,14 @@ Scenario: pass
         assert_eq!(cp.scenarios.len(), 3);
 
         let entry_a = cp.scenarios.get("场景 A").unwrap();
-        assert_eq!(entry_a.verdict, crate::spec_core::Verdict::Pass);
+        assert_eq!(entry_a.verdict, agent_spec::spec_core::Verdict::Pass);
         assert_eq!(entry_a.vcs_ref, Some("def456".into()));
 
         let entry_b = cp.scenarios.get("场景 B").unwrap();
-        assert_eq!(entry_b.verdict, crate::spec_core::Verdict::Fail);
+        assert_eq!(entry_b.verdict, agent_spec::spec_core::Verdict::Fail);
 
         let entry_c = cp.scenarios.get("场景 C").unwrap();
-        assert_eq!(entry_c.verdict, crate::spec_core::Verdict::Skip);
+        assert_eq!(entry_c.verdict, agent_spec::spec_core::Verdict::Skip);
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -4610,7 +4460,7 @@ Scenario: pass
         let mut stem_to_idx = std::collections::HashMap::new();
 
         for file in &spec_files {
-            let doc = crate::spec_parser::parse_spec(file).unwrap();
+            let doc = agent_spec::spec_parser::parse_spec(file).unwrap();
             let stem = file
                 .file_stem()
                 .unwrap()
@@ -4674,7 +4524,7 @@ Scenario: pass
 
         let mut spec_files = Vec::new();
         super::collect_spec_files(&dir, &mut spec_files).unwrap();
-        let doc = crate::spec_parser::parse_spec(&spec_files[0]).unwrap();
+        let doc = agent_spec::spec_parser::parse_spec(&spec_files[0]).unwrap();
 
         let nodes = vec![super::GraphNode {
             name: doc.meta.name,
@@ -4709,7 +4559,7 @@ Scenario: pass
 
         let mut nodes = Vec::new();
         for file in &spec_files {
-            let doc = crate::spec_parser::parse_spec(file).unwrap();
+            let doc = agent_spec::spec_parser::parse_spec(file).unwrap();
             let stem = file
                 .file_stem()
                 .unwrap()
@@ -4762,7 +4612,7 @@ Scenario: pass
         let mut stem_to_idx = std::collections::HashMap::new();
 
         for file in &spec_files {
-            let doc = crate::spec_parser::parse_spec(file).unwrap();
+            let doc = agent_spec::spec_parser::parse_spec(file).unwrap();
             let stem = file
                 .file_stem()
                 .unwrap()

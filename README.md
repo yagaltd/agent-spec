@@ -32,6 +32,45 @@ agent-spec lifecycle specs/user-registration-api.spec --code .
 agent-spec guard --spec-dir specs --code .
 ```
 
+## Library usage
+
+The crate is split into a **library** (the spec parse / lint / verify engine,
+importable by other crates) and the thin **CLI binary** above. Consumers pin it
+as a git dependency and call the engine directly — no shelling out:
+
+```toml
+[dependencies]
+agent-spec = { git = "https://github.com/yagaltd/agent-spec", rev = "<pinned>" }
+```
+
+```rust
+use agent_spec::spec_gateway::SpecGateway;
+use agent_spec::spec_parser::parse_spec_from_str;
+
+// Parse a `.spec` contract into its AST (scenarios, constraints, decisions).
+let gw = SpecGateway::from_input("spec: task\nname: \"refund\"\n---\n...")?;
+let resolved = gw.resolved();            // AST with inherited constraints merged
+
+// Lint quality gate + contract renderer.
+let lint = gw.lint();                    // LintReport (diagnostics, quality score)
+let contract = gw.contract();            // TaskContract (intent, must, must_not, ...)
+
+// Verify a code directory against the contract.
+let report = gw.verify("./src")?;       // VerificationReport: per-scenario verdicts
+let passing = gw.is_passing(&report);
+
+// Dependency-aware verdicts: if a prerequisite failed, dependents become Skip.
+agent_spec::spec_gateway::apply_dependency_skips(&mut report, &resolved.all_scenarios);
+```
+
+Key public modules: `spec_parser` (parse entry points), `spec_lint`
+(quality pipeline), `spec_verify` (`Verifier` trait, structural/boundary/test/ai
+layers, `run_verification`), `spec_gateway` (`SpecGateway` lifecycle
+orchestration, `apply_dependency_skips`, `topological_sort_scenarios`),
+`spec_report` (text/json/md formatters), `spec_core` (shared AST, verdicts,
+reports). The CLI is a thin wrapper over these — every subcommand keeps
+byte-identical behavior.
+
 ## Task Contract
 
 A contract has four parts:
