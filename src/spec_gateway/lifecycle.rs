@@ -8,8 +8,9 @@ use crate::spec_core::{LintReport, SpecResult, Verdict, VerificationReport};
 use crate::spec_lint::LintPipeline;
 use crate::spec_report::OutputFormat;
 use crate::spec_verify::{
-    AiBackend, AiMode, AiVerifier, BombadilVerifier, BoundariesVerifier, ComplexityVerifier, StructuralVerifier,
-    TddGuardVerifier, TestVerifier, VerificationContext, Verifier, run_verification,
+    AiBackend, AiMode, AiVerifier, BombadilVerifier, BoundariesVerifier, ComplexityVerifier,
+    NodeTestVerifier, NoopVerifier, StructuralVerifier, TddGuardVerifier, TestVerifier,
+    TestVerifierKind, VerificationContext, Verifier, detect_test_verifier, run_verification,
 };
 
 use super::TaskContract;
@@ -201,6 +202,12 @@ impl SpecGateway {
         ai_mode: AiMode,
         ai: AiVerifier,
     ) -> SpecResult<VerificationReport> {
+        let test_verifier: Box<dyn Verifier> = match detect_test_verifier(&code_paths) {
+            TestVerifierKind::Rust => Box::new(TestVerifier),
+            TestVerifierKind::Node => Box::new(NodeTestVerifier),
+            TestVerifierKind::None => Box::new(NoopVerifier),
+        };
+
         let ctx = VerificationContext {
             code_paths,
             change_paths,
@@ -210,12 +217,12 @@ impl SpecGateway {
 
         let structural = StructuralVerifier;
         let boundaries = BoundariesVerifier;
-        let test = TestVerifier;
         let tdd_guard = TddGuardVerifier;
         let bombadil = BombadilVerifier;
         let complexity = ComplexityVerifier;
+
         let verifiers: Vec<&dyn Verifier> =
-            vec![&structural, &boundaries, &test, &tdd_guard, &bombadil, &ai, &complexity];
+            vec![&structural, &boundaries, test_verifier.as_ref(), &tdd_guard, &bombadil, &ai, &complexity];
         run_verification(&ctx, &verifiers)
     }
 

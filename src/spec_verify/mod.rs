@@ -2,6 +2,7 @@ mod ai_verifier;
 mod bombadil_verifier;
 mod boundaries;
 mod complexity;
+mod node_test_verifier;
 mod structural;
 mod tdd_guard_verifier;
 mod test_verifier;
@@ -17,6 +18,7 @@ pub use ai_verifier::{AiBackend, AiVerifier, build_ai_request};
 pub use bombadil_verifier::BombadilVerifier;
 pub use boundaries::BoundariesVerifier;
 pub use complexity::ComplexityVerifier;
+pub use node_test_verifier::NodeTestVerifier;
 pub use structural::StructuralVerifier;
 pub use tdd_guard_verifier::TddGuardVerifier;
 pub use test_verifier::TestVerifier;
@@ -37,6 +39,74 @@ pub struct VerificationContext {
     pub change_paths: Vec<PathBuf>,
     pub ai_mode: AiMode,
     pub resolved_spec: ResolvedSpec,
+}
+
+/// Which test runner should verify scenario selectors for the given code paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestVerifierKind {
+    /// Rust project (`Cargo.toml` found) — use [`TestVerifier`].
+    Rust,
+    /// Node.js project using `node --test` — use [`NodeTestVerifier`].
+    Node,
+    /// No test runner detected — scenarios fall through to skip.
+    None,
+}
+
+/// Detect which test verifier to use from the code paths.
+///
+/// Priority: a `Cargo.toml` manifest selects the Rust verifier; otherwise a
+/// `package.json` with a `node --test` script (or `*.test.js` files) selects
+/// the Node verifier; otherwise no test verifier is selected.
+pub fn detect_test_verifier(code_paths: &[PathBuf]) -> TestVerifierKind {
+    if find_manifest_root(code_paths, "Cargo.toml").is_some() {
+        return TestVerifierKind::Rust;
+    }
+
+    if let Some(root) = find_manifest_root(code_paths, "package.json")
+        && node_test_verifier::is_node_test_project(&root, code_paths)
+    {
+        return TestVerifierKind::Node;
+    }
+
+    TestVerifierKind::None
+}
+
+/// Find the nearest ancestor directory (starting from each code path) that
+/// contains the named manifest file (e.g. `Cargo.toml` or `package.json`).
+pub(crate) fn find_manifest_root(code_paths: &[PathBuf], manifest_name: &str) -> Option<PathBuf> {
+    for path in code_paths {
+        let mut current = if path.is_file() {
+            path.parent()?.to_path_buf()
+        } else {
+            path.clone()
+        };
+
+        loop {
+            if current.join(manifest_name).is_file() {
+                return Some(current);
+            }
+            if !current.pop() {
+                break;
+            }
+        }
+    }
+
+    None
+}
+
+/// A test verifier that reports nothing, preserving the legacy skip behavior
+/// when no test runner is detected.
+#[derive(Debug, Clone, Copy)]
+pub struct NoopVerifier;
+
+impl Verifier for NoopVerifier {
+    fn name(&self) -> &str {
+        "noop"
+    }
+
+    fn verify(&self, _ctx: &VerificationContext) -> SpecResult<Vec<ScenarioResult>> {
+        Ok(Vec::new())
+    }
 }
 
 /// Trait for scenario verifiers.

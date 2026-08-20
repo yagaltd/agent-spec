@@ -8,6 +8,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_spec::spec_core::{ScenarioResult, VerificationReport};
 use agent_spec::spec_gateway::{
@@ -15,7 +16,8 @@ use agent_spec::spec_gateway::{
 };
 use agent_spec::spec_parser::parse_spec_from_str;
 use agent_spec::spec_verify::{
-    run_verification, AiMode, StructuralVerifier, VerificationContext,
+    detect_test_verifier, run_verification, AiMode, NoopVerifier, StructuralVerifier,
+    TestVerifierKind, VerificationContext,
 };
 
 const SAMPLE_SPEC: &str = r#"spec: task
@@ -201,4 +203,154 @@ fn dependency_skip_and_topological_order_via_public_api() {
     let pos_a = order.iter().position(|&i| i == idx_a).unwrap();
     let pos_b = order.iter().position(|&i| i == idx_b).unwrap();
     assert!(pos_a < pos_b, "dependency must run before its dependent");
+}
+
+// ── Node test verifier (node:test) fixtures ──────────────────
+
+const NODE_SPEC: &str = r#"spec: task
+name: "node-verifier"
+---
+
+## 完成条件
+
+场景: 通过用例
+  测试: test_passing_case
+  假设 存在一个通过的 Node 测试
+  当 运行 node --test
+  那么 测试通过
+
+场景: 失败用例
+  测试: test_failing_case
+  假设 存在一个失败的 Node 测试
+  当 运行 node --test
+  那么 测试失败
+"#;
+
+/// Write a minimal node:test project into a fresh temp dir.
+fn temp_node_project() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "agent-spec-node-test-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "fixture", "version": "1.0.0", "scripts": {"test": "node --test"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("cases.test.js"),
+        r#"const { test } = require('node:test');
+const assert = require('node:assert');
+
+test('test_passing_case', () => {
+  assert.ok(true);
+});
+
+test('test_failing_case', () => {
+  assert.ok(false);
+});
+"#,
+    )
+    .unwrap();
+    dir
+}
+
+fn verdict_for(report: &VerificationReport, scenario: &str) -> agent_spec::spec_core::Verdict {
+    report
+        .results
+        .iter()
+        .find(|r| r.scenario_name == scenario)
+        .unwrap_or_else(|| panic!("no result for scenario {scenario}"))
+        .verdict
+}
+
+#[test]
+fn node_test_verifier_passes_named_test() {
+    let dir = temp_node_project();
+    let gw = SpecGateway::from_input(NODE_SPEC).unwrap();
+    let report = gw.verify_paths(&[dir.clone()]).unwrap();
+    assert_eq!(
+        verdict_for(&report, "通过用例"),
+        agent_spec::spec_core::Verdict::Pass
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn node_test_verifier_fails_named_test() {
+    let dir = temp_node_project();
+    let gw = SpecGateway::from_input(NODE_SPEC).unwrap();
+    let report = gw.verify_paths(&[dir.clone()]).unwrap();
+    assert_eq!(
+        verdict_for(&report, "失败用例"),
+        agent_spec::spec_core::Verdict::Fail
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn detection_chooses_rust_verifier_for_cargo_toml() {
+    let dir = std::env::temp_dir().join(format!(
+        "agent-spec-detect-rust-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("Cargo.toml"), "[package]\nname = \"x\"\nversion = \"0.1.0\"\n").unwrap();
+    assert_eq!(
+        detect_test_verifier(&[dir.clone()]),
+        TestVerifierKind::Rust
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn detection_chooses_node_verifier_for_package_json() {
+    let dir = temp_node_project();
+    assert_eq!(
+        detect_test_verifier(&[dir.clone()]),
+        TestVerifierKind::Node
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn detection_returns_none_when_no_manifests() {
+    let dir = std::env::temp_dir().join(format!(
+        "agent-spec-detect-none-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    assert_eq!(
+        detect_test_verifier(&[dir.clone()]),
+        TestVerifierKind::None
+    );
+    // With no test runner selected, the noop verifier contributes nothing and
+    // the scenario falls through to the skip verdict in run_verification.
+    let gw = SpecGateway::from_input(NODE_SPEC).unwrap();
+    let ctx = VerificationContext {
+        code_paths: vec![dir.clone()],
+        change_paths: vec![],
+        ai_mode: AiMode::Off,
+        resolved_spec: gw.resolved().clone(),
+    };
+    let noop = NoopVerifier;
+    let report = run_verification(&ctx, &[&noop]).unwrap();
+    assert_eq!(
+        verdict_for(&report, "通过用例"),
+        agent_spec::spec_core::Verdict::Skip
+    );
+    let _ = fs::remove_dir_all(dir);
 }
