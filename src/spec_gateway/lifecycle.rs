@@ -8,9 +8,10 @@ use crate::spec_core::{LintReport, SpecResult, Verdict, VerificationReport};
 use crate::spec_lint::LintPipeline;
 use crate::spec_report::OutputFormat;
 use crate::spec_verify::{
-    AiBackend, AiMode, AiVerifier, BombadilVerifier, BoundariesVerifier, ComplexityVerifier,
-    NodeTestVerifier, NoopVerifier, StructuralVerifier, TddGuardVerifier, TestVerifier,
-    TestVerifierKind, VerificationContext, Verifier, detect_test_verifier, run_verification,
+    AiBackend, AiMode, AiVerifier, BombadilVerifier, BoundariesVerifier, BunTestVerifier,
+    ComplexityVerifier, NodeTestVerifier, NoopVerifier, StructuralVerifier, TddGuardVerifier,
+    TestVerifier, TestVerifierKind, VerificationContext, Verifier, detect_test_verifier,
+    run_verification,
 };
 
 use super::TaskContract;
@@ -205,6 +206,7 @@ impl SpecGateway {
         let test_verifier: Box<dyn Verifier> = match detect_test_verifier(&code_paths) {
             TestVerifierKind::Rust => Box::new(TestVerifier),
             TestVerifierKind::Node => Box::new(NodeTestVerifier),
+            TestVerifierKind::Bun => Box::new(BunTestVerifier),
             TestVerifierKind::None => Box::new(NoopVerifier),
         };
 
@@ -230,6 +232,33 @@ impl SpecGateway {
 
     pub fn is_passing(&self, report: &VerificationReport) -> bool {
         self.is_passing_with_review_mode(report, "auto")
+    }
+
+    /// Check if verification is passing, with review mode support and an
+    /// explicit skip policy.
+    ///
+    /// - `fail_on_skip == false` (lifecycle default): skips are not failures —
+    ///   the run passes when nothing failed and nothing is uncertain. Skipped
+    ///   counts stay visible in the report.
+    /// - `fail_on_skip == true` (`--fail-on-skip`): any skipped scenario makes
+    ///   the run non-passing.
+    pub fn is_passing_with_options(
+        &self,
+        report: &VerificationReport,
+        review_mode: &str,
+        fail_on_skip: bool,
+    ) -> bool {
+        let base = report.summary.total > 0
+            && report.summary.failed == 0
+            && report.summary.uncertain == 0
+            && (!fail_on_skip || report.summary.skipped == 0);
+
+        if review_mode == "strict" {
+            base && report.summary.pending_review == 0
+        } else {
+            // "auto" mode: PendingReview counts as pass
+            base
+        }
     }
 
     /// Check if verification is passing, with review mode support.
@@ -1129,6 +1158,64 @@ name: "AI host backend"
             })
             .collect();
         VerificationReport::from_results(spec_name.to_owned(), results)
+    }
+
+    // ── Skip-aware passing policy tests ──────────────────────
+
+    #[test]
+    fn test_skip_tolerant_passing_is_the_lifecycle_default() {
+        let report = make_report(
+            "skip-policy",
+            &[("covered", Verdict::Pass), ("unmatched", Verdict::Skip)],
+        );
+
+        assert_eq!(report.summary.failed, 0);
+        assert_eq!(report.summary.skipped, 1);
+
+        // Lifecycle default: skips are NOT failures — exit 0 with skip counts
+        // still visible in the report.
+        let gw = SpecGateway::from_input(CRITICAL_SAMPLE).unwrap();
+        assert!(gw.is_passing_with_options(&report, "auto", false));
+    }
+
+    #[test]
+    fn test_fail_on_skip_makes_skips_non_passing() {
+        let report = make_report(
+            "skip-policy",
+            &[("covered", Verdict::Pass), ("unmatched", Verdict::Skip)],
+        );
+
+        let gw = SpecGateway::from_input(CRITICAL_SAMPLE).unwrap();
+        assert!(!gw.is_passing_with_options(&report, "auto", true));
+    }
+
+    #[test]
+    fn test_fail_on_skip_still_passes_when_nothing_is_skipped() {
+        let report = make_report("skip-policy", &[("covered", Verdict::Pass)]);
+
+        let gw = SpecGateway::from_input(CRITICAL_SAMPLE).unwrap();
+        assert!(gw.is_passing_with_options(&report, "auto", true));
+    }
+
+    #[test]
+    fn test_failures_block_passing_regardless_of_skip_policy() {
+        let report = make_report(
+            "skip-policy",
+            &[("covered", Verdict::Pass), ("broken", Verdict::Fail)],
+        );
+
+        let gw = SpecGateway::from_input(CRITICAL_SAMPLE).unwrap();
+        assert!(!gw.is_passing_with_options(&report, "auto", false));
+        assert!(!gw.is_passing_with_options(&report, "auto", true));
+    }
+
+    #[test]
+    fn test_legacy_is_passing_still_treats_skips_as_non_passing() {
+        let report = make_report("skip-policy", &[("unmatched", Verdict::Skip)]);
+
+        let gw = SpecGateway::from_input(CRITICAL_SAMPLE).unwrap();
+        // Other commands (guard, resolve-ai) keep the stricter behavior.
+        assert!(!gw.is_passing(&report));
     }
 
     const CRITICAL_SAMPLE: &str = r#"spec: task

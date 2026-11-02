@@ -20,15 +20,15 @@ use super::{VerificationContext, Verifier};
 pub struct NodeTestVerifier;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BindingSource {
+pub(crate) enum BindingSource {
     ExplicitScenarioSelector,
     LegacyComment,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct TestBinding {
-    selector: TestSelector,
-    source: BindingSource,
+pub(crate) struct TestBinding {
+    pub(crate) selector: TestSelector,
+    pub(crate) source: BindingSource,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,7 +217,9 @@ fn is_node_test_file(path: &Path) -> bool {
         })
 }
 
-fn collect_legacy_comment_bindings(code_paths: &[PathBuf]) -> SpecResult<HashMap<String, String>> {
+pub(crate) fn collect_legacy_comment_bindings(
+    code_paths: &[PathBuf],
+) -> SpecResult<HashMap<String, String>> {
     let mut bindings = HashMap::new();
     let mut files = Vec::new();
 
@@ -241,7 +243,7 @@ fn collect_legacy_comment_bindings(code_paths: &[PathBuf]) -> SpecResult<HashMap
     Ok(bindings)
 }
 
-fn resolve_test_binding(
+pub(crate) fn resolve_test_binding(
     scenario: &Scenario,
     legacy_bindings: &HashMap<String, String>,
 ) -> Option<TestBinding> {
@@ -361,7 +363,7 @@ fn parse_tap_for_test(output: &str, test_name: &str) -> TapOutcome {
 }
 
 /// Match the name portion of a TAP test-point line (`1 - test_name`).
-fn tap_point_matches(rest: &str, test_name: &str) -> bool {
+pub(crate) fn tap_point_matches(rest: &str, test_name: &str) -> bool {
     rest.find(" - ")
         .is_some_and(|idx| rest[idx + 3..].trim_end() == test_name)
 }

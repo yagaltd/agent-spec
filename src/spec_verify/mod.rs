@@ -1,6 +1,7 @@
 mod ai_verifier;
 mod bombadil_verifier;
 mod boundaries;
+mod bun_test_verifier;
 mod complexity;
 mod node_test_verifier;
 mod structural;
@@ -17,6 +18,7 @@ use crate::spec_core::{
 pub use ai_verifier::{AiBackend, AiVerifier, build_ai_request};
 pub use bombadil_verifier::BombadilVerifier;
 pub use boundaries::BoundariesVerifier;
+pub use bun_test_verifier::BunTestVerifier;
 pub use complexity::ComplexityVerifier;
 pub use node_test_verifier::NodeTestVerifier;
 pub use structural::StructuralVerifier;
@@ -48,18 +50,26 @@ pub enum TestVerifierKind {
     Rust,
     /// Node.js project using `node --test` — use [`NodeTestVerifier`].
     Node,
+    /// Bun project (`bun test`) — use [`BunTestVerifier`].
+    Bun,
     /// No test runner detected — scenarios fall through to skip.
     None,
 }
 
 /// Detect which test verifier to use from the code paths.
 ///
-/// Priority: a `Cargo.toml` manifest selects the Rust verifier; otherwise a
-/// `package.json` with a `node --test` script (or `*.test.js` files) selects
-/// the Node verifier; otherwise no test verifier is selected.
+/// Priority: a `Cargo.toml` manifest selects the Rust verifier; a Bun marker
+/// (lockfile, `bunfig.toml`, bun-flavored `package.json`, or `bun:test`
+/// imports) selects the Bun verifier; otherwise a `package.json` with a
+/// `node --test` script (or `*.test.js` files) selects the Node verifier;
+/// otherwise no test verifier is selected.
 pub fn detect_test_verifier(code_paths: &[PathBuf]) -> TestVerifierKind {
     if find_manifest_root(code_paths, "Cargo.toml").is_some() {
         return TestVerifierKind::Rust;
+    }
+
+    if bun_test_verifier::find_bun_project_root(code_paths).is_some() {
+        return TestVerifierKind::Bun;
     }
 
     if let Some(root) = find_manifest_root(code_paths, "package.json")

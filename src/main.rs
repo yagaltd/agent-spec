@@ -121,6 +121,9 @@ enum Commands {
         /// How to treat pending_review verdicts: auto (count as pass) or strict (count as non-passing)
         #[arg(long, default_value = "auto")]
         review_mode: String,
+        /// Fail when any scenario is skipped (default: skips do not fail the run)
+        #[arg(long)]
+        fail_on_skip: bool,
     },
     /// Compatibility alias for the contract view
     Brief {
@@ -294,6 +297,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             layers,
             resume,
             review_mode,
+            fail_on_skip,
         } => cmd_lifecycle(
             &spec,
             &code,
@@ -307,6 +311,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             layers.as_deref(),
             resume,
             &review_mode,
+            fail_on_skip,
         ),
         Commands::Brief { spec, format } => cmd_brief(&spec, &format),
         Commands::Contract { spec, format } => cmd_contract(&spec, &format),
@@ -504,6 +509,7 @@ fn cmd_lifecycle(
     layers: Option<&str>,
     resume: Option<Option<String>>,
     review_mode: &str,
+    fail_on_skip: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Validate --resume requires --run-log-dir
     let resume_mode = if let Some(ref mode_opt) = resume {
@@ -590,7 +596,7 @@ fn cmd_lifecycle(
     let mut verify_report = verify_report;
     agent_spec::spec_gateway::apply_dependency_skips(&mut verify_report, &gw.resolved().all_scenarios);
 
-    let passing = gw.is_passing_with_review_mode(&verify_report, review_mode);
+    let passing = gw.is_passing_with_options(&verify_report, review_mode, fail_on_skip);
 
     // Collect optimization candidates: optimize-mode scenarios that passed
     let optimization_candidates: Vec<String> = gw
@@ -3705,6 +3711,42 @@ Scenario: verification metadata stays visible
     }
 
     // === Phase 6 Tests ===
+
+    #[test]
+    fn test_lifecycle_fail_on_skip_flag_defaults_off() {
+        // Default: --fail-on-skip is off (skips do not fail the run)
+        let cli = super::Cli::try_parse_from([
+            "agent-spec",
+            "lifecycle",
+            "specs/project.spec",
+            "--code",
+            ".",
+        ])
+        .unwrap();
+        match cli.command {
+            super::Commands::Lifecycle { fail_on_skip, .. } => {
+                assert!(!fail_on_skip, "fail_on_skip should default to false");
+            }
+            _ => panic!("expected Lifecycle command"),
+        }
+
+        // With --fail-on-skip: any skipped scenario fails the run
+        let cli2 = super::Cli::try_parse_from([
+            "agent-spec",
+            "lifecycle",
+            "specs/project.spec",
+            "--code",
+            ".",
+            "--fail-on-skip",
+        ])
+        .unwrap();
+        match cli2.command {
+            super::Commands::Lifecycle { fail_on_skip, .. } => {
+                assert!(fail_on_skip, "--fail-on-skip should set fail_on_skip");
+            }
+            _ => panic!("expected Lifecycle command"),
+        }
+    }
 
     #[test]
     fn test_lifecycle_layers_flag_selects_verification_stack() {
