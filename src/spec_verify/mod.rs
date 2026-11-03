@@ -18,6 +18,8 @@ use crate::spec_core::{
 pub use ai_verifier::{AiBackend, AiVerifier, build_ai_request};
 pub use bombadil_verifier::BombadilVerifier;
 pub use boundaries::BoundariesVerifier;
+// Single source of truth for boundary-pattern helpers (spec_gateway/plan.rs reuses them).
+pub(crate) use boundaries::{looks_like_path_boundary, normalize_pattern, path_matches_pattern};
 pub use bun_test_verifier::BunTestVerifier;
 pub use complexity::ComplexityVerifier;
 pub use node_test_verifier::NodeTestVerifier;

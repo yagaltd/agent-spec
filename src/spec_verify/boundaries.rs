@@ -130,7 +130,7 @@ fn collect_path_boundaries(sections: &[crate::spec_core::Section]) -> (Vec<Strin
     (allowed, forbidden)
 }
 
-fn looks_like_path_boundary(text: &str) -> bool {
+pub(crate) fn looks_like_path_boundary(text: &str) -> bool {
     let trimmed = text.trim();
     trimmed.contains('/')
         || trimmed.contains('\\')
@@ -158,8 +158,8 @@ fn normalize_change_paths(paths: &[PathBuf], workspace_root: Option<&Path>) -> V
 
 fn normalize_path(path: &Path, workspace_root: Option<&Path>) -> String {
     let candidate = workspace_root
-        .and_then(|root| path.strip_prefix(root).ok())
-        .unwrap_or(path);
+        .and_then(|root| strip_root_prefix(path, root))
+        .unwrap_or_else(|| path.to_path_buf());
 
     candidate
         .to_string_lossy()
@@ -169,9 +169,43 @@ fn normalize_path(path: &Path, workspace_root: Option<&Path>) -> String {
         .to_string()
 }
 
-fn normalize_pattern(pattern: &str) -> String {
-    pattern
-        .trim()
+/// Strip `root` from `path`, comparing canonical forms when the two live in
+/// different frames — e.g. guard's relative `.` code root against the ABSOLUTE
+/// change paths git worktree scopes produce. A bare `strip_prefix` can never
+/// bridge that mismatch and would leak `home/aurel/...` into the change set.
+fn strip_root_prefix(path: &Path, root: &Path) -> Option<PathBuf> {
+    if let Ok(relative) = path.strip_prefix(root) {
+        return Some(relative.to_path_buf());
+    }
+
+    let canonical_root = root.canonicalize().ok()?;
+    if path.is_absolute() {
+        path.strip_prefix(&canonical_root).ok().map(Path::to_path_buf)
+    } else {
+        let absolute = std::env::current_dir().ok()?.join(path);
+        absolute
+            .strip_prefix(&canonical_root)
+            .ok()
+            .map(Path::to_path_buf)
+    }
+}
+
+/// Normalize a boundary bullet into a path glob pattern.
+///
+/// Decorated bullets (`` - `src/**` — description ``) must yield only the
+/// backticked span; trimming backticks at the ends alone would keep the
+/// description inside the pattern. The first span wins when several exist.
+pub(crate) fn normalize_pattern(pattern: &str) -> String {
+    let base = match pattern.find('`') {
+        Some(start) => match pattern[start + 1..].find('`') {
+            Some(end) => &pattern[start + 1..start + 1 + end],
+            // Unbalanced backtick: keep the legacy end-trimming behavior.
+            None => pattern,
+        },
+        None => pattern,
+    };
+
+    base.trim()
         .trim_matches('`')
         .replace('\\', "/")
         .trim_start_matches("./")
@@ -179,7 +213,7 @@ fn normalize_pattern(pattern: &str) -> String {
         .to_string()
 }
 
-fn path_matches_pattern(pattern: &str, path: &str) -> bool {
+pub(crate) fn path_matches_pattern(pattern: &str, path: &str) -> bool {
     let pattern_segments: Vec<&str> = pattern
         .split('/')
         .filter(|segment| !segment.is_empty())
@@ -257,7 +291,10 @@ fn find_workspace_root(paths: &[PathBuf]) -> Option<PathBuf> {
         };
 
         loop {
-            if current.join("Cargo.toml").is_file() {
+            // Git WORKTREES carry `.git` as a FILE (gitdir pointer), regular
+            // repos as a directory — accept both. `Cargo.toml` still selects
+            // Rust workspace roots; first ancestor match wins.
+            if current.join(".git").exists() || current.join("Cargo.toml").is_file() {
                 return Some(current);
             }
             if !current.pop() {
@@ -272,7 +309,7 @@ fn find_workspace_root(paths: &[PathBuf]) -> Option<PathBuf> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use crate::spec_core::{ResolvedSpec, Scenario, SpecLevel, SpecMeta, SpecResult, Verdict};
 
@@ -403,6 +440,98 @@ name: "边界"
                 .reason
                 .contains("matches forbidden boundary")
         );
+    }
+
+    // ---- regression: git WORKTREES carry `.git` as a FILE, not a dir ----
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("agent-spec-wsroot-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        root
+    }
+
+    #[test]
+    fn normalize_path_strips_absolute_paths_against_relative_root() {
+        // guard runs `--code .` (relative root) but receives ABSOLUTE worktree
+        // change paths; only the canonical frames can bridge that mismatch.
+        let cwd = std::env::current_dir().unwrap();
+        let absolute_change = cwd.join("Cargo.toml");
+        assert_eq!(
+            super::normalize_path(&absolute_change, Some(Path::new("."))),
+            "Cargo.toml"
+        );
+    }
+
+    #[test]
+    fn find_workspace_root_detects_git_file_marker_without_cargo_toml() {
+        let root = temp_root("git-file");
+        std::fs::create_dir_all(root.join("a/b/repo/src")).unwrap();
+        std::fs::write(root.join("a/b/repo/.git"), "gitdir: /elsewhere").unwrap();
+        std::fs::write(root.join("a/b/repo/src/sort.rs"), "fn main() {}").unwrap();
+
+        let detected = super::find_workspace_root(&[root.join("a/b/repo/src/sort.rs")]);
+        assert_eq!(detected.as_deref(), Some(root.join("a/b/repo").as_path()));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn normalize_change_paths_makes_git_file_root_changes_repo_relative() {
+        let root = temp_root("git-file-rel");
+        std::fs::create_dir_all(root.join("repo/src")).unwrap();
+        std::fs::write(root.join("repo/.git"), "gitdir: /elsewhere").unwrap();
+        std::fs::write(root.join("repo/src/sort.rs"), "fn main() {}").unwrap();
+
+        let change = root.join("repo/src/sort.rs");
+        let workspace_root = super::find_workspace_root(std::slice::from_ref(&change));
+        let changes = super::normalize_change_paths(std::slice::from_ref(&change), workspace_root.as_deref());
+
+        assert_eq!(changes, vec!["src/sort.rs".to_string()]);
+        assert!(
+            !changes[0].contains("home/aurel"),
+            "absolute path leaked into change set: {}",
+            changes[0]
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ---- regression: decorated bullets keep the description inside the pattern ----
+
+    #[test]
+    fn normalize_pattern_extracts_first_backtick_span() {
+        assert_eq!(super::normalize_pattern("`src/**` — all source changes"), "src/**");
+        assert_eq!(super::normalize_pattern("src/**"), "src/**");
+        assert_eq!(super::normalize_pattern("`a/b` x `c`"), "a/b");
+    }
+
+    #[test]
+    fn decorated_backtick_bullet_is_recognized_by_boundaries_verifier() {
+        let resolved = make_resolved_spec(
+            r#"spec: task
+name: "probe"
+---
+
+## Boundaries
+
+### Allowed Changes
+- `src/**` — all source changes
+"#,
+        )
+        .unwrap();
+
+        let verifier = BoundariesVerifier;
+        let results = verifier
+            .verify(&VerificationContext {
+                code_paths: vec![PathBuf::from(".")],
+                change_paths: vec![PathBuf::from("src/sort.rs")],
+                ai_mode: AiMode::Off,
+                resolved_spec: resolved,
+            })
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].verdict, Verdict::Pass);
     }
 
     #[test]

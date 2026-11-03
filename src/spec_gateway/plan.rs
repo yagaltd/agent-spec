@@ -6,6 +6,7 @@ use serde::Serialize;
 
 use super::TaskContract;
 use crate::spec_core::{BoundaryCategory, Section};
+use crate::spec_verify::{looks_like_path_boundary, normalize_pattern, path_matches_pattern};
 
 /// Complete plan context: contract + codebase + task sketch.
 #[derive(Debug, Clone, Serialize)]
@@ -101,34 +102,13 @@ fn collect_allowed_patterns(sections: &[Section]) -> Vec<String> {
     for section in sections {
         if let Section::Boundaries { items, .. } = section {
             for item in items {
-                if item.category == BoundaryCategory::Allow && looks_like_path(&item.text) {
+                if item.category == BoundaryCategory::Allow && looks_like_path_boundary(&item.text) {
                     allowed.push(normalize_pattern(&item.text));
                 }
             }
         }
     }
     allowed
-}
-
-fn looks_like_path(text: &str) -> bool {
-    let trimmed = text.trim();
-    trimmed.contains('/')
-        || trimmed.contains('\\')
-        || trimmed.contains('*')
-        || trimmed.ends_with(".rs")
-        || trimmed.ends_with(".ts")
-        || trimmed.ends_with(".js")
-        || trimmed.ends_with(".py")
-}
-
-fn normalize_pattern(pattern: &str) -> String {
-    pattern
-        .trim()
-        .trim_matches('`')
-        .replace('\\', "/")
-        .trim_start_matches("./")
-        .trim_matches('/')
-        .to_string()
 }
 
 /// Scan the codebase for files matching allowed patterns.
@@ -425,69 +405,6 @@ fn is_gitignored(rel_path: &str, rules: &[String]) -> bool {
         }
     }
     false
-}
-
-/// Glob pattern matching (reuses logic from boundaries.rs).
-fn path_matches_pattern(pattern: &str, path: &str) -> bool {
-    let pattern_segments: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
-    let path_segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    match_segments(&pattern_segments, &path_segments)
-}
-
-fn match_segments(pattern: &[&str], path: &[&str]) -> bool {
-    if pattern.is_empty() {
-        return path.is_empty();
-    }
-
-    if pattern[0] == "**" {
-        return (0..=path.len()).any(|i| match_segments(&pattern[1..], &path[i..]));
-    }
-
-    if path.is_empty() {
-        return false;
-    }
-
-    segment_matches(pattern[0], path[0]) && match_segments(&pattern[1..], &path[1..])
-}
-
-fn segment_matches(pattern: &str, segment: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if !pattern.contains('*') {
-        return pattern == segment;
-    }
-
-    let parts: Vec<&str> = pattern.split('*').collect();
-    let anchored_start = !pattern.starts_with('*');
-    let anchored_end = !pattern.ends_with('*');
-    let mut cursor = 0usize;
-
-    for (index, part) in parts.iter().enumerate() {
-        if part.is_empty() {
-            continue;
-        }
-        if index == 0 && anchored_start {
-            if !segment[cursor..].starts_with(part) {
-                return false;
-            }
-            cursor += part.len();
-            continue;
-        }
-        if let Some(found) = segment[cursor..].find(part) {
-            cursor += found + part.len();
-        } else {
-            return false;
-        }
-    }
-
-    if anchored_end
-        && let Some(last_part) = parts.iter().rev().find(|part| !part.is_empty())
-    {
-        return segment.ends_with(last_part);
-    }
-
-    true
 }
 
 /// Build a task sketch from scenario dependencies using topological sort.
@@ -1267,5 +1184,41 @@ mod tests {
         assert_eq!(extract_base_dir("src/spec_gateway/**"), "src/spec_gateway");
         assert_eq!(extract_base_dir("**"), ".");
         assert_eq!(extract_base_dir("src/*.rs"), "src");
+    }
+
+    // ---- regression: decorated bullets must yield the backticked span only ----
+
+    #[test]
+    fn collect_allowed_patterns_extracts_first_backtick_span() {
+        let resolved = ResolvedSpec {
+            task: SpecDocument {
+                meta: SpecMeta {
+                    level: SpecLevel::Task,
+                    name: "probe".into(),
+                    inherits: None,
+                    lang: vec![],
+                    tags: vec![],
+                    depends: vec![],
+                    estimate: None,
+                },
+                sections: vec![Section::Boundaries {
+                    items: vec![Boundary {
+                        text: "`src/**` — all source changes".into(),
+                        category: BoundaryCategory::Allow,
+                        span: Span::line(1),
+                    }],
+                    span: Span::line(1),
+                }],
+                source_path: PathBuf::new(),
+            },
+            inherited_constraints: vec![],
+            inherited_decisions: vec![],
+            all_scenarios: vec![],
+        };
+
+        assert_eq!(
+            collect_allowed_patterns(&resolved.task.sections),
+            vec!["src/**".to_string()]
+        );
     }
 }
