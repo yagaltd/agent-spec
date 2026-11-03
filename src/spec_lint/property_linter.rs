@@ -1,5 +1,5 @@
 use crate::spec_core::{
-    LintDiagnostic, Scenario, Section, Severity, Span, SpecDocument, StepKind,
+    LintDiagnostic, Scenario, Section, Severity, SpecDocument,
 };
 
 use super::pipeline::SpecLinter;
