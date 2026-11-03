@@ -162,7 +162,7 @@ fn looks_like_property_test(scenario: &Scenario) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spec_core::Step;
+    use crate::spec_core::{Span, Step, StepKind};
 
     fn make_scenario(name: &str, steps: Vec<(&str, &str)>, test_sel: Option<&str>) -> Scenario {
         Scenario {
