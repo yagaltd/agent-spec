@@ -2,6 +2,7 @@ use crate::spec_core::{LintReport, Severity, Verdict, VerificationReport};
 use serde::Serialize;
 
 /// Output format.
+#[derive(Debug)]
 pub enum OutputFormat {
     Text,
     Json,
@@ -621,18 +622,15 @@ fn format_verification_compact(report: &VerificationReport) -> String {
     let mut parts: Vec<String> = Vec::new();
     for r in &report.results {
         let icon = match r.verdict {
-            Verdict::Pass => "\u{2713}",  // ✓
-            Verdict::Fail => "\u{2717}",  // ✗
-            Verdict::Skip => "\u{2298}",  // ⊘
+            Verdict::Pass => "\u{2713}", // ✓
+            Verdict::Fail => "\u{2717}", // ✗
+            Verdict::Skip => "\u{2298}", // ⊘
             Verdict::Uncertain => "?",
-            Verdict::PendingReview => "\u{2299}",  // ⊙
+            Verdict::PendingReview => "\u{2299}", // ⊙
         };
         parts.push(format!("{icon} {}", r.scenario_name));
     }
-    let summary = format!(
-        "{}/{} pass",
-        report.summary.passed, report.summary.total,
-    );
+    let summary = format!("{}/{} pass", report.summary.passed, report.summary.total,);
     format!("{}  | {}", parts.join("  "), summary)
 }
 
@@ -737,8 +735,53 @@ fn format_lint_md(report: &LintReport) -> String {
 mod tests {
     use super::*;
     use crate::spec_core::{
-        Evidence, ScenarioResult, StepVerdict, VerificationReport, VerificationSummary,
+        Evidence, ScenarioResult, StepVerdict, Verdict, VerificationReport, VerificationSummary,
     };
+
+    /// Totality pin: format_verification / format_explain must never panic on
+    /// a minimal (empty-results) report across every output format.
+    #[test]
+    fn test_formatters_total_on_minimal_report() {
+        let report = VerificationReport {
+            spec_name: "minimal".to_string(),
+            results: Vec::new(),
+            summary: VerificationSummary {
+                total: 0,
+                passed: 0,
+                failed: 0,
+                skipped: 0,
+                uncertain: 0,
+                pending_review: 0,
+            },
+        };
+        let input = ExplainInput {
+            name: "minimal".to_string(),
+            intent: String::new(),
+            must: Vec::new(),
+            must_not: Vec::new(),
+            decisions: Vec::new(),
+            allowed_changes: Vec::new(),
+            forbidden: Vec::new(),
+            out_of_scope: Vec::new(),
+        };
+
+        let formats = [
+            OutputFormat::Text,
+            OutputFormat::Json,
+            OutputFormat::Markdown,
+            OutputFormat::Compact,
+            OutputFormat::Diagnostic,
+        ];
+        for format in &formats {
+            let verification = format_verification(&report, format);
+            assert!(
+                !verification.is_empty(),
+                "format_verification {format:?} empty"
+            );
+            let explain = format_explain(&input, &report, format);
+            assert!(!explain.is_empty(), "format_explain {format:?} empty");
+        }
+    }
 
     #[test]
     fn test_format_verification_text() {
@@ -1061,7 +1104,10 @@ mod tests {
         assert!(output.contains('\u{2717}'), "should contain ✗ for fail");
         assert!(output.contains('\u{2298}'), "should contain ⊘ for skip");
         // Should contain pass count
-        assert!(output.contains("1/3 pass"), "should contain pass count summary");
+        assert!(
+            output.contains("1/3 pass"),
+            "should contain pass count summary"
+        );
         // Should be a single line
         let line_count = output.lines().count();
         assert!(

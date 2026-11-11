@@ -384,7 +384,9 @@ fn cmd_parse(files: &[PathBuf], format: &str) -> Result<(), Box<dyn std::error::
                         agent_spec::spec_core::Section::Boundaries { items, .. } => {
                             println!("    - Boundaries: {} items", items.len());
                         }
-                        agent_spec::spec_core::Section::AcceptanceCriteria { scenarios, .. } => {
+                        agent_spec::spec_core::Section::AcceptanceCriteria {
+                            scenarios, ..
+                        } => {
                             println!("    - Acceptance Criteria: {} scenarios", scenarios.len());
                             for s in scenarios {
                                 println!("      - {}: {} steps", s.name, s.steps.len());
@@ -417,7 +419,10 @@ fn cmd_lint(
         let doc = agent_spec::spec_parser::parse_spec(file)?;
         let report = pipeline.run(&doc);
 
-        println!("{}", agent_spec::spec_report::format_lint(&report, &out_format));
+        println!(
+            "{}",
+            agent_spec::spec_report::format_lint(&report, &out_format)
+        );
 
         if report.has_errors() {
             eprintln!(
@@ -594,7 +599,10 @@ fn cmd_lifecycle(
 
     // Apply dependency skips: if a scenario's prerequisite failed, skip it
     let mut verify_report = verify_report;
-    agent_spec::spec_gateway::apply_dependency_skips(&mut verify_report, &gw.resolved().all_scenarios);
+    agent_spec::spec_gateway::apply_dependency_skips(
+        &mut verify_report,
+        &gw.resolved().all_scenarios,
+    );
 
     let passing = gw.is_passing_with_options(&verify_report, review_mode, fail_on_skip);
 
@@ -605,10 +613,9 @@ fn cmd_lifecycle(
         .iter()
         .filter(|s| s.mode == agent_spec::spec_core::ScenarioMode::Optimize)
         .filter(|s| {
-            verify_report
-                .results
-                .iter()
-                .any(|r| r.scenario_name == s.name && r.verdict == agent_spec::spec_core::Verdict::Pass)
+            verify_report.results.iter().any(|r| {
+                r.scenario_name == s.name && r.verdict == agent_spec::spec_core::Verdict::Pass
+            })
         })
         .map(|s| s.name.clone())
         .collect();
@@ -675,8 +682,7 @@ fn cmd_lifecycle(
             json_out["layers"] = serde_json::json!(layer_list);
         }
         if !optimization_candidates.is_empty() {
-            json_out["optimization_candidates"] =
-                serde_json::json!(optimization_candidates);
+            json_out["optimization_candidates"] = serde_json::json!(optimization_candidates);
         }
         println!("{}", serde_json::to_string_pretty(&json_out)?);
     } else {
@@ -888,7 +894,11 @@ fn warn_duplicate_spec_extensions(spec_files: &[PathBuf]) {
                 stem,
                 paths
                     .iter()
-                    .map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string())
+                    .map(|p| p
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
             );
@@ -1115,7 +1125,9 @@ fn append_unique_paths(target: &mut Vec<PathBuf>, extra: Vec<PathBuf>) {
     }
 }
 
-fn parse_ai_mode(input: &str) -> Result<agent_spec::spec_verify::AiMode, Box<dyn std::error::Error>> {
+fn parse_ai_mode(
+    input: &str,
+) -> Result<agent_spec::spec_verify::AiMode, Box<dyn std::error::Error>> {
     match input {
         "off" => Ok(agent_spec::spec_verify::AiMode::Off),
         "stub" => Ok(agent_spec::spec_verify::AiMode::Stub),
@@ -1395,9 +1407,7 @@ fn merge_checkpoint_results(
                             result.evidence.push(spec_core::Evidence::PatternMatch {
                                 pattern: "checkpoint:incremental".into(),
                                 matched: true,
-                                locations: vec![
-                                    "verdict carried forward from checkpoint".into(),
-                                ],
+                                locations: vec!["verdict carried forward from checkpoint".into()],
                             });
                             result.duration_ms = 0;
                         }
@@ -2187,8 +2197,10 @@ fn cmd_resolve_ai(
         }
     }
 
-    let merged_report =
-        agent_spec::spec_core::VerificationReport::from_results(verify_report.spec_name, merged_results);
+    let merged_report = agent_spec::spec_core::VerificationReport::from_results(
+        verify_report.spec_name,
+        merged_results,
+    );
 
     let passing = gw.is_passing(&merged_report);
 
@@ -2589,30 +2601,76 @@ fn check_plan(content: &str) -> PlanCheckResult {
             warnings.push(format!("Dependency source '{from}' not found in spec map"));
         }
         if !tasks.contains(to) {
-            errors.push(format!("Dependency target '{to}' not found in spec map — referenced by {from}"));
+            errors.push(format!(
+                "Dependency target '{to}' not found in spec map — referenced by {from}"
+            ));
         }
     }
 
     // Check for circular dependencies
     if let Some(cycle) = detect_cycle(&deps, &tasks) {
-        errors.push(format!("Circular dependency detected: {}", cycle.join(" → ")));
+        errors.push(format!(
+            "Circular dependency detected: {}",
+            cycle.join(" → ")
+        ));
     }
 
     // Validate bottleneck tags
-    let valid_bottlenecks = ["BLOCKING", "RISKY", "TIME-CONSUMING", "VERIFICATION-HEAVY", "STANDARD"];
-    let bottleneck_pattern = regex::Regex::new(r"\*\*Bottleneck\*\*:\s*(?:🔴|🟡|🔵|🟠|⚪)?\s*(\S+)").unwrap();
+    let valid_bottlenecks = [
+        "BLOCKING",
+        "RISKY",
+        "TIME-CONSUMING",
+        "VERIFICATION-HEAVY",
+        "STANDARD",
+    ];
+    let Some(bottleneck_pattern) =
+        regex::Regex::new(r"\*\*Bottleneck\*\*:\s*(?:🔴|🟡|🔵|🟠|⚪)?\s*(\S+)").ok()
+    else {
+        errors.push("internal: bottleneck regex failed to compile".to_string());
+        let valid = errors.is_empty();
+        return PlanCheckResult {
+            valid,
+            errors,
+            warnings,
+            tasks,
+            dependency_edges: deps,
+        };
+    };
     for cap in bottleneck_pattern.captures_iter(content) {
         let tag = &cap[1];
         // Strip emoji prefix if present
         let tag_clean = tag.trim_start_matches(|c: char| !c.is_alphabetic());
         if !valid_bottlenecks.iter().any(|vb| tag_clean.starts_with(vb)) {
-            warnings.push(format!("Unknown bottleneck tag: '{tag}' — expected one of: {}", valid_bottlenecks.join(", ")));
+            warnings.push(format!(
+                "Unknown bottleneck tag: '{tag}' — expected one of: {}",
+                valid_bottlenecks.join(", ")
+            ));
         }
     }
 
     // Check contract status consistency
-    let written_pattern = regex::Regex::new(r"Contract status.*WRITTEN").unwrap();
-    let spec_pattern = regex::Regex::new(r"Contract.*specs/").unwrap();
+    let Some(written_pattern) = regex::Regex::new(r"Contract status.*WRITTEN").ok() else {
+        errors.push("internal: WRITTEN regex failed to compile".to_string());
+        let valid = errors.is_empty();
+        return PlanCheckResult {
+            valid,
+            errors,
+            warnings,
+            tasks,
+            dependency_edges: deps,
+        };
+    };
+    let Some(spec_pattern) = regex::Regex::new(r"Contract.*specs/").ok() else {
+        errors.push("internal: spec-path regex failed to compile".to_string());
+        let valid = errors.is_empty();
+        return PlanCheckResult {
+            valid,
+            errors,
+            warnings,
+            tasks,
+            dependency_edges: deps,
+        };
+    };
     let written_count = written_pattern.find_iter(content).count();
     let spec_count = spec_pattern.find_iter(content).count();
     if written_count > spec_count {
@@ -2637,12 +2695,19 @@ fn parse_dependencies(content: &str) -> (Vec<(String, String)>, Vec<String>) {
     let errors = Vec::new();
 
     // Find the Dependencies section
-    let in_deps = content.lines().skip_while(|line| !line.starts_with("## Dependencies"));
+    let in_deps = content
+        .lines()
+        .skip_while(|line| !line.starts_with("## Dependencies"));
     let dep_lines: Vec<&str> = in_deps
         .take_while(|line| !line.starts_with("## ") || line.starts_with("## Dependencies"))
         .collect();
 
-    let re = regex::Regex::new(r"^(TASK_\w+):\s*\[([^\]]*)\]").unwrap();
+    let Some(re) = regex::Regex::new(r"^(TASK_\w+):\s*\[([^\]]*)\]").ok() else {
+        return (
+            edges,
+            vec!["internal: dependency regex failed to compile".to_string()],
+        );
+    };
 
     for line in &dep_lines {
         if let Some(caps) = re.captures(line) {
@@ -2667,14 +2732,18 @@ fn parse_dependencies(content: &str) -> (Vec<(String, String)>, Vec<String>) {
 
 /// Extract TASK IDs from the spec map
 fn extract_task_ids(content: &str) -> Vec<String> {
-    let re = regex::Regex::new(r"(?m)^###\s+(TASK\s+\d+)").unwrap();
+    let Some(re) = regex::Regex::new(r"(?m)^###\s+(TASK\s+\d+)").ok() else {
+        return Vec::new();
+    };
     let mut tasks = Vec::new();
     for cap in re.captures_iter(content) {
         tasks.push(cap[1].replace(' ', "_"));
     }
 
     // Also match TASK_N format in dependencies
-    let re2 = regex::Regex::new(r"(?m)^(TASK_\d+):").unwrap();
+    let Some(re2) = regex::Regex::new(r"(?m)^(TASK_\d+):").ok() else {
+        return tasks;
+    };
     for cap in re2.captures_iter(content) {
         let id = cap[1].to_string();
         if !tasks.contains(&id) {
@@ -2699,7 +2768,8 @@ fn detect_cycle(edges: &[(String, String)], nodes: &[String]) -> Option<Vec<Stri
     let mut path = Vec::new();
 
     for node in nodes {
-        if let Some(cycle) = dfs_cycle(node.as_str(), &adj, &mut visited, &mut in_stack, &mut path) {
+        if let Some(cycle) = dfs_cycle(node.as_str(), &adj, &mut visited, &mut in_stack, &mut path)
+        {
             return Some(cycle);
         }
     }
@@ -2742,7 +2812,6 @@ fn dfs_cycle<'a>(
     None
 }
 
-
 #[cfg(test)]
 #[allow(clippy::collapsible_if, clippy::expect_used, clippy::unwrap_used)]
 mod tests {
@@ -2754,12 +2823,11 @@ mod tests {
 
     use super::{
         GitChangeScope, ResumeMode, RunLogEntry, build_stamp_trailers, checkpoint_path,
-        cmd_init_at, generate_rewrite_parity_template_both,
-        generate_rewrite_parity_template_en, generate_rewrite_parity_template_zh,
-        generate_template_both, generate_template_en, generate_template_zh, is_spec_file,
-        load_checkpoint, merge_checkpoint_results, parse_ai_mode, render_brief_output,
-        render_contract_output, resolve_command_change_paths, resolve_guard_change_paths,
-        save_checkpoint, vcs, warn_duplicate_spec_extensions,
+        cmd_init_at, generate_rewrite_parity_template_both, generate_rewrite_parity_template_en,
+        generate_rewrite_parity_template_zh, generate_template_both, generate_template_en,
+        generate_template_zh, is_spec_file, load_checkpoint, merge_checkpoint_results,
+        parse_ai_mode, render_brief_output, render_contract_output, resolve_command_change_paths,
+        resolve_guard_change_paths, save_checkpoint, vcs, warn_duplicate_spec_extensions,
     };
 
     const SAMPLE: &str = r#"spec: task
@@ -3319,9 +3387,10 @@ Scenario: verification metadata stays visible
             repo_root().join("specs/roadmap/task-phase2-run-history-and-vcs-context.spec.md"),
         )
         .unwrap();
-        let phase3 =
-            fs::read_to_string(repo_root().join("specs/roadmap/task-phase3-spec-governance.spec.md"))
-                .unwrap();
+        let phase3 = fs::read_to_string(
+            repo_root().join("specs/roadmap/task-phase3-spec-governance.spec.md"),
+        )
+        .unwrap();
         let phase4 = fs::read_to_string(
             repo_root().join("specs/roadmap/task-phase4-ai-verification-expansion.spec.md"),
         )
@@ -4137,7 +4206,10 @@ Scenario: verification metadata stays visible
 
         let parsed: super::ScenarioAiDecision = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.scenario_name, "AI 场景");
-        assert_eq!(parsed.decision.verdict, agent_spec::spec_core::Verdict::Pass);
+        assert_eq!(
+            parsed.decision.verdict,
+            agent_spec::spec_core::Verdict::Pass
+        );
         assert_eq!(parsed.decision.model, "claude-agent");
     }
 
@@ -4538,7 +4610,11 @@ Scenario: pass
 
         let estimates: Vec<f64> = nodes
             .iter()
-            .map(|n| n.estimate.as_deref().map_or(0.0, super::parse_estimate_days))
+            .map(|n| {
+                n.estimate
+                    .as_deref()
+                    .map_or(0.0, super::parse_estimate_days)
+            })
             .collect();
         let critical = super::compute_critical_path(nodes.len(), &edges, &estimates);
         let dot = super::generate_dot(&nodes, &edges, &critical);
@@ -4577,7 +4653,10 @@ Scenario: pass
         }];
 
         let dot = super::generate_dot(&nodes, &[], &[]);
-        assert!(dot.contains("2d"), "DOT node label should contain estimate '2d'");
+        assert!(
+            dot.contains("2d"),
+            "DOT node label should contain estimate '2d'"
+        );
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -4684,13 +4763,20 @@ Scenario: pass
 
         let estimates: Vec<f64> = nodes
             .iter()
-            .map(|n| n.estimate.as_deref().map_or(0.0, super::parse_estimate_days))
+            .map(|n| {
+                n.estimate
+                    .as_deref()
+                    .map_or(0.0, super::parse_estimate_days)
+            })
             .collect();
         let critical = super::compute_critical_path(nodes.len(), &edges, &estimates);
         let dot = super::generate_dot(&nodes, &edges, &critical);
 
         // Critical path A -> B -> C should be marked red
-        assert!(dot.contains("color=red"), "Critical path edges should be colored red");
+        assert!(
+            dot.contains("color=red"),
+            "Critical path edges should be colored red"
+        );
 
         let _ = fs::remove_dir_all(dir);
     }

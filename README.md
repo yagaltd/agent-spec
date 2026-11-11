@@ -6,6 +6,25 @@
 
 AI-native BDD/spec verification tool. You write the contract, the agent implements against it, the machine verifies the result.
 
+## Fuzzing
+
+The repo ships a cargo-fuzz scaffold in [`fuzz/`](fuzz) (a separate crate — it is never built by `cargo test` / `cargo build` in the repo root). Targets:
+
+- `fuzz_spec_parse` — arbitrary bytes through the bilingual keyword matchers and `parse_spec_from_str`
+- `fuzz_tool_output` — tdd-guard JSON, bun output, git numstat, and complexity parsers
+- `fuzz_report_format` — report formatters on pseudo-random verification reports
+
+Run (nightly toolchain required):
+
+```bash
+cargo install cargo-fuzz --locked
+cargo +nightly fuzz run fuzz_spec_parse -- -max_total_time=60
+cargo +nightly fuzz run fuzz_tool_output -- -max_total_time=60
+cargo +nightly fuzz run fuzz_report_format -- -max_total_time=60
+```
+
+Crash artifacts land in `fuzz/artifacts/`; any panic is a real bug — fix the root cause in `src/`, then pin it with a regression test.
+
 ## Install
 
 ```bash
@@ -126,6 +145,25 @@ Scenario: Duplicate email is rejected
 - **Completion Criteria**: BDD scenarios with explicit `Test:` selectors
 
 Chinese headings are also supported (`## 意图`, `## 已定决策`, `## 边界`, `## 完成条件`, `场景:`, `测试:`).
+
+## AI Agent Skills (Claude Code, tool-first)
+
+This repo ships agent skills under [`skills/`](skills). The default integration path is **tool-first**: the agent uses `agent-spec` as a CLI tool and drives tasks through `contract`, `lifecycle`, and `guard`.
+
+The `agent-spec-tool-first` skill tells the agent to read the Contract first, implement within its Boundaries, run `lifecycle` to verify, and retry on failure without modifying the spec.
+
+Install the skills for Claude Code:
+
+```bash
+# One-line install (CLI + Claude Code skills)
+./install-skills.sh
+
+# Or copy manually
+mkdir -p ~/.claude/skills
+cp -r skills/agent-spec-tool-first ~/.claude/skills/
+```
+
+The equivalent Codex guidance lives in [`AGENTS.md`](AGENTS.md).
 
 ## Commands
 
@@ -254,6 +292,25 @@ agent-spec lifecycle specs/my-task.spec --code . --ai-mode stub
 | `off` | Default. Mechanical verification only. |
 | `stub` | Mark uncovered scenarios as `uncertain` with structured evidence. |
 | `caller` | Two-step protocol: agent writes AI decisions, then merges back. |
+
+### Rewrite / Parity Contracts
+
+For rewrite/parity work (porting a CLI, migrating a service), the authoring path must explicitly bind observable behavior **before** coding:
+
+- command x output mode
+- local x remote
+- warm cache x cold start
+- success x partial failure x hard failure
+
+If stdout/stderr, `--json`, `-o/--output`, local/remote, cache state, or fallback order are only described in prose, go back to authoring mode and add scenarios first.
+
+Start from the parity-aware template:
+
+```bash
+agent-spec init --level task --template rewrite-parity --lang en --name "CLI Parity Contract"
+```
+
+See [`examples/rewrite-parity-contract.spec`](examples/rewrite-parity-contract.spec) for a concrete parity-oriented contract.
 
 ## Examples
 

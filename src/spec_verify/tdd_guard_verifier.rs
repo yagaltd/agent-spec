@@ -1,6 +1,4 @@
-use crate::spec_core::{
-    Evidence, ScenarioResult, SpecResult, StepVerdict, Verdict,
-};
+use crate::spec_core::{Evidence, ScenarioResult, SpecResult, StepVerdict, Verdict};
 use crate::spec_verify::VerificationContext;
 use crate::spec_verify::Verifier;
 
@@ -124,10 +122,7 @@ impl Verifier for TddGuardVerifier {
     }
 }
 
-fn skip_all(
-    resolved: &crate::spec_core::ResolvedSpec,
-    reason: &str,
-) -> Vec<ScenarioResult> {
+fn skip_all(resolved: &crate::spec_core::ResolvedSpec, reason: &str) -> Vec<ScenarioResult> {
     resolved
         .all_scenarios
         .iter()
@@ -146,7 +141,7 @@ fn skip_all(
 }
 
 #[derive(Default)]
-struct TddGuardLintResult {
+pub struct TddGuardLintResult {
     checks: Vec<TddGuardCheck>,
 }
 
@@ -167,14 +162,11 @@ struct TddGuardViolation {
 
 impl TddGuardLintResult {
     fn total_violations(&self) -> usize {
-        self.checks
-            .iter()
-            .map(|c| c.violations.len())
-            .sum()
+        self.checks.iter().map(|c| c.violations.len()).sum()
     }
 }
 
-fn parse_tdd_guard_output(json: &str) -> TddGuardLintResult {
+pub fn parse_tdd_guard_output(json: &str) -> TddGuardLintResult {
     let parsed: serde_json::Value = match serde_json::from_str(json) {
         Ok(v) => v,
         Err(_) => return TddGuardLintResult::default(),
@@ -235,9 +227,7 @@ fn find_related_violations(
         .checks
         .iter()
         .flat_map(|c| &c.violations)
-        .filter(|v| {
-            v.message.contains(selector.as_str()) || v.file.contains(selector.as_str())
-        })
+        .filter(|v| v.message.contains(selector.as_str()) || v.file.contains(selector.as_str()))
         .cloned()
         .collect()
 }

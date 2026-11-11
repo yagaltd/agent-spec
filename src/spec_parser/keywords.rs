@@ -516,4 +516,108 @@ mod tests {
         assert!(match_step_keyword("这是普通文字").is_none());
         assert!(match_step_keyword("- 约束条目").is_none());
     }
+
+    /// Deterministic edge-case table: every keywords matcher must be total
+    /// (never panic) and return the documented Some/None outcome for each
+    /// pathological input. GREEN = current behavior is total & sane.
+    #[test]
+    fn test_keywords_matchers_edge_case_table() {
+        let cases: &[&str] = &[
+            "",                                        // empty line
+            "\r\n",                                    // CRLF
+            "\r",                                      // bare CR
+            "   ",                                     // whitespace only
+            "  \t Given x  ",                          // leading/trailing whitespace
+            "GIVEN x",                                 // mixed case keyword
+            "WhEn x",                                  // mixed case keyword
+            "tHeN x",                                  // mixed case keyword
+            "AND x",                                   // mixed case keyword
+            "BUT x",                                   // mixed case keyword
+            "假设 用户存在",                           // multibyte Chinese
+            "假设\u{3000}用户存在", // ideographic space after keyword (not matched)
+            "假设 emoji 🎉 step",   // multibyte + emoji payload
+            "Scenario: 中文场景名", // scenario with CJK name
+            "测试: test_中文_名",   // selector with CJK name
+            "Tags: [a, b, c]",      // normal tags
+            "Tags: []",             // empty tags
+            "Tags:",                // missing value
+            "Review:",              // missing value
+            "Mode:",                // missing value
+            "Depends:",             // missing value
+            "Package:",             // selector field missing value
+            "TEST DOUBLE: fixture", // mixed-case structured field
+            "not a keyword at all", // plain prose
+            &format!("Given {}", "x".repeat(10_000)), // very long line
+            &format!("场景: {}", "长".repeat(10_000)), // very long CJK line
+        ];
+
+        for input in cases {
+            // Every matcher must return without panicking.
+            let _step = match_step_keyword(input);
+            let _section = match_section_header(input);
+            let _scenario = match_scenario_header(input);
+            let _selector = match_test_selector(input);
+            let _tags = match_scenario_tags(input);
+            let _field = match_test_selector_field(input);
+            let _review = match_review_field(input);
+            let _mode = match_mode_field(input);
+            let _depends = match_depends_field(input);
+            let _params = extract_params(input);
+        }
+
+        // Documented outcomes for the canonical edge inputs.
+        assert!(match_step_keyword("").is_none());
+        assert!(match_step_keyword("\r\n").is_none());
+        assert!(match_step_keyword("   ").is_none());
+        assert!(match_step_keyword("  \t Given x  ").is_some());
+        assert!(match_step_keyword("GIVEN x").is_some());
+        assert!(match_step_keyword("假设 emoji 🎉 step").is_some());
+        // Chinese keywords match without a trailing space, so the ideographic
+        // space still matches (bare 假设 prefix), rest trimmed.
+        assert!(match_step_keyword("假设\u{3000}用户存在").is_some());
+
+        assert_eq!(match_scenario_header("  Scenario: name  "), Some("name"));
+        assert_eq!(
+            match_scenario_header("场景: 中文场景名"),
+            Some("中文场景名")
+        );
+        assert!(match_scenario_header("plain").is_none());
+
+        assert_eq!(match_test_selector("  Test: foo  "), Some("foo"));
+        assert_eq!(
+            match_test_selector("测试: test_中文_名"),
+            Some("test_中文_名")
+        );
+        assert!(match_test_selector("Test").is_none());
+
+        assert_eq!(match_scenario_tags("Tags: []"), Some(Vec::<String>::new()));
+        assert!(match_scenario_tags("Tags:").is_some());
+        assert!(match_scenario_tags("tags: [a, b]").is_some());
+        assert!(match_scenario_tags("no tags here").is_none());
+
+        assert_eq!(
+            match_test_selector_field("TEST DOUBLE: fixture"),
+            Some((TestSelectorField::TestDouble, "fixture"))
+        );
+        assert!(match_test_selector_field("Package:").is_some());
+        assert!(match_test_selector_field("unknown: x").is_none());
+
+        assert!(match_review_field("Review:").is_some());
+        assert!(match_review_field("审核: human").is_some());
+        assert!(match_review_field("random").is_none());
+
+        assert!(match_mode_field("Mode:").is_some());
+        assert!(match_mode_field("模式: optimize").is_some());
+        assert!(match_mode_field("random").is_none());
+
+        assert!(match_depends_field("Depends:").is_some());
+        assert!(match_depends_field("前置: A, B").is_some());
+        assert!(match_depends_field("random").is_none());
+
+        assert!(extract_params("").is_empty());
+        assert_eq!(extract_params("a \"x\" b \"y\" c"), vec!["x", "y"]);
+        assert_eq!(extract_params("中文 \"参数\" 🎉"), vec!["参数"]);
+        // Unclosed quote collects until end of input.
+        assert_eq!(extract_params("\"unclosed"), vec!["unclosed"]);
+    }
 }

@@ -126,15 +126,11 @@ impl ScenarioMode {
 /// Review mode for a scenario: whether it needs human review after passing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ReviewMode {
+    #[default]
     Auto,
     Human,
-}
-
-impl Default for ReviewMode {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 impl ReviewMode {
@@ -164,10 +160,7 @@ impl Scenario {
     /// Returns `true` if this scenario is marked as critical — either via a
     /// `critical` tag or a `(critical)` / `（critical）` name suffix (case-insensitive).
     pub fn is_critical(&self) -> bool {
-        let has_tag = self
-            .tags
-            .iter()
-            .any(|t| t.eq_ignore_ascii_case("critical"));
+        let has_tag = self.tags.iter().any(|t| t.eq_ignore_ascii_case("critical"));
         if has_tag {
             return true;
         }

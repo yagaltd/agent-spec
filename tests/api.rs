@@ -7,17 +7,15 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_spec::spec_core::{ScenarioResult, VerificationReport};
-use agent_spec::spec_gateway::{
-    apply_dependency_skips, topological_sort_scenarios, SpecGateway,
-};
+use agent_spec::spec_gateway::{SpecGateway, apply_dependency_skips, topological_sort_scenarios};
 use agent_spec::spec_parser::parse_spec_from_str;
 use agent_spec::spec_verify::{
-    detect_test_verifier, run_verification, AiMode, NoopVerifier, StructuralVerifier,
-    TestVerifierKind, VerificationContext,
+    AiMode, NoopVerifier, StructuralVerifier, TestVerifierKind, VerificationContext,
+    detect_test_verifier, run_verification,
 };
 
 const SAMPLE_SPEC: &str = r#"spec: task
@@ -60,10 +58,10 @@ fn temp_file(name: &str, content: &str) -> PathBuf {
     path
 }
 
-fn structural_verdict(gw: &SpecGateway, file: &PathBuf) -> agent_spec::spec_core::Verdict {
+fn structural_verdict(gw: &SpecGateway, file: &Path) -> agent_spec::spec_core::Verdict {
     let ctx = VerificationContext {
-        code_paths: vec![file.clone()],
-        change_paths: vec![file.clone()],
+        code_paths: vec![file.to_path_buf()],
+        change_paths: vec![file.to_path_buf()],
         ai_mode: AiMode::Off,
         resolved_spec: gw.resolved().clone(),
     };
@@ -273,7 +271,7 @@ fn verdict_for(report: &VerificationReport, scenario: &str) -> agent_spec::spec_
 fn node_test_verifier_passes_named_test() {
     let dir = temp_node_project();
     let gw = SpecGateway::from_input(NODE_SPEC).unwrap();
-    let report = gw.verify_paths(&[dir.clone()]).unwrap();
+    let report = gw.verify_paths(std::slice::from_ref(&dir)).unwrap();
     assert_eq!(
         verdict_for(&report, "通过用例"),
         agent_spec::spec_core::Verdict::Pass
@@ -285,7 +283,7 @@ fn node_test_verifier_passes_named_test() {
 fn node_test_verifier_fails_named_test() {
     let dir = temp_node_project();
     let gw = SpecGateway::from_input(NODE_SPEC).unwrap();
-    let report = gw.verify_paths(&[dir.clone()]).unwrap();
+    let report = gw.verify_paths(std::slice::from_ref(&dir)).unwrap();
     assert_eq!(
         verdict_for(&report, "失败用例"),
         agent_spec::spec_core::Verdict::Fail
@@ -304,9 +302,13 @@ fn detection_chooses_rust_verifier_for_cargo_toml() {
             .as_nanos()
     ));
     fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("Cargo.toml"), "[package]\nname = \"x\"\nversion = \"0.1.0\"\n").unwrap();
+    fs::write(
+        dir.join("Cargo.toml"),
+        "[package]\nname = \"x\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
     assert_eq!(
-        detect_test_verifier(&[dir.clone()]),
+        detect_test_verifier(std::slice::from_ref(&dir)),
         TestVerifierKind::Rust
     );
     let _ = fs::remove_dir_all(dir);
@@ -316,7 +318,7 @@ fn detection_chooses_rust_verifier_for_cargo_toml() {
 fn detection_chooses_node_verifier_for_package_json() {
     let dir = temp_node_project();
     assert_eq!(
-        detect_test_verifier(&[dir.clone()]),
+        detect_test_verifier(std::slice::from_ref(&dir)),
         TestVerifierKind::Node
     );
     let _ = fs::remove_dir_all(dir);
@@ -334,7 +336,7 @@ fn detection_returns_none_when_no_manifests() {
     ));
     fs::create_dir_all(&dir).unwrap();
     assert_eq!(
-        detect_test_verifier(&[dir.clone()]),
+        detect_test_verifier(std::slice::from_ref(&dir)),
         TestVerifierKind::None
     );
     // With no test runner selected, the noop verifier contributes nothing and

@@ -22,7 +22,7 @@ use super::{VerificationContext, Verifier};
 pub struct BunTestVerifier;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BunOutcome {
+pub enum BunOutcome {
     Passed,
     Failed,
     NotFound,
@@ -187,7 +187,7 @@ pub(crate) fn bun_test_command(root: &Path) -> (String, Vec<String>) {
 /// Returns `Passed` when a `(pass) <name>` line (or a TAP `ok` point) names
 /// the test, `Failed` when a `(fail) <name>` line (or `not ok` point) names
 /// it, and `NotFound` when the filter matched no test at all.
-pub(crate) fn parse_bun_output_for_test(output: &str, test_name: &str) -> BunOutcome {
+pub fn parse_bun_output_for_test(output: &str, test_name: &str) -> BunOutcome {
     let mut found_passing = false;
 
     for line in output.lines() {
@@ -316,7 +316,9 @@ fn bun_line_names_test(rest: &str, test_name: &str) -> bool {
     // Spec selectors may regex-escape parens for `bun test -t` (literal-paren
     // test names); correlate on the unescaped form so both sides line up.
     let wanted = test_name.replace("\\(", "(").replace("\\)", ")");
-    name == wanted || name == test_name || name.ends_with(&format!(" > {wanted}"))
+    name == wanted
+        || name == test_name
+        || name.ends_with(&format!(" > {wanted}"))
         || name.ends_with(&format!(" > {test_name}"))
 }
 
@@ -430,21 +432,30 @@ mod tests {
     fn detects_bun_project_from_lockfile() {
         let root = temp_root("lock");
         fs::write(root.join("bun.lock"), "{}").unwrap();
-        assert_eq!(find_bun_project_root(std::slice::from_ref(&root)), Some(root));
+        assert_eq!(
+            find_bun_project_root(std::slice::from_ref(&root)),
+            Some(root)
+        );
     }
 
     #[test]
     fn detects_bun_project_from_binary_lockfile() {
         let root = temp_root("lockb");
         fs::write(root.join("bun.lockb"), vec![0u8, 1, 2]).unwrap();
-        assert_eq!(find_bun_project_root(std::slice::from_ref(&root)), Some(root));
+        assert_eq!(
+            find_bun_project_root(std::slice::from_ref(&root)),
+            Some(root)
+        );
     }
 
     #[test]
     fn detects_bun_project_from_bunfig() {
         let root = temp_root("fig");
         fs::write(root.join("bunfig.toml"), "[test]\n").unwrap();
-        assert_eq!(find_bun_project_root(std::slice::from_ref(&root)), Some(root));
+        assert_eq!(
+            find_bun_project_root(std::slice::from_ref(&root)),
+            Some(root)
+        );
     }
 
     #[test]
@@ -455,7 +466,10 @@ mod tests {
             r#"{"scripts": {"test": "bun test"}}"#,
         )
         .unwrap();
-        assert_eq!(find_bun_project_root(std::slice::from_ref(&root)), Some(root));
+        assert_eq!(
+            find_bun_project_root(std::slice::from_ref(&root)),
+            Some(root)
+        );
     }
 
     #[test]
@@ -466,7 +480,10 @@ mod tests {
             r#"{"devDependencies": {"bun-types": "1.0.0"}}"#,
         )
         .unwrap();
-        assert_eq!(find_bun_project_root(std::slice::from_ref(&root)), Some(root));
+        assert_eq!(
+            find_bun_project_root(std::slice::from_ref(&root)),
+            Some(root)
+        );
     }
 
     #[test]
@@ -478,7 +495,10 @@ mod tests {
             "import { test, expect } from \"bun:test\";\ntest(\"x\", () => {});\n",
         )
         .unwrap();
-        assert_eq!(find_bun_project_root(std::slice::from_ref(&root)), Some(root));
+        assert_eq!(
+            find_bun_project_root(std::slice::from_ref(&root)),
+            Some(root)
+        );
     }
 
     #[test]
@@ -532,7 +552,11 @@ mod tests {
         assert_eq!(program, "bun");
         assert_eq!(
             args,
-            vec!["test".to_string(), "--preload".to_string(), "./preload.ts".to_string()]
+            vec![
+                "test".to_string(),
+                "--preload".to_string(),
+                "./preload.ts".to_string()
+            ]
         );
     }
 
@@ -620,7 +644,11 @@ mod tests {
 
     #[test]
     fn executes_bun_scenario_pass_fail_and_skip() {
-        if std::process::Command::new("bun").arg("--version").output().is_err() {
+        if std::process::Command::new("bun")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
             // bun not installed in this environment; detection stays exercised.
             return;
         }
@@ -656,7 +684,6 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].verdict, Verdict::Skip);
     }
-
 }
 
 #[cfg(test)]

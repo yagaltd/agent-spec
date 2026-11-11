@@ -34,4 +34,4 @@ pub mod vcs;
 // Re-exports for ergonomic `use agent_spec::{parse_spec, ...};` access.
 pub use spec_gateway::SpecGateway;
 pub use spec_parser::{parse_spec, parse_spec_from_str, resolve_spec};
-pub use spec_verify::{run_verification, AiMode, Verifier};
+pub use spec_verify::{AiMode, Verifier, run_verification};
