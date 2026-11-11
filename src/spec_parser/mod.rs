@@ -1,4 +1,4 @@
-mod keywords;
+pub mod keywords;
 mod meta;
 mod parser;
 mod resolver;

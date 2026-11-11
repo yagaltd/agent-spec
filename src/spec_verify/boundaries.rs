@@ -180,7 +180,9 @@ fn strip_root_prefix(path: &Path, root: &Path) -> Option<PathBuf> {
 
     let canonical_root = root.canonicalize().ok()?;
     if path.is_absolute() {
-        path.strip_prefix(&canonical_root).ok().map(Path::to_path_buf)
+        path.strip_prefix(&canonical_root)
+            .ok()
+            .map(Path::to_path_buf)
     } else {
         let absolute = std::env::current_dir().ok()?.join(path);
         absolute
@@ -445,7 +447,8 @@ name: "边界"
     // ---- regression: git WORKTREES carry `.git` as a FILE, not a dir ----
 
     fn temp_root(tag: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("agent-spec-wsroot-{}-{tag}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("agent-spec-wsroot-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         root
     }
@@ -484,7 +487,8 @@ name: "边界"
 
         let change = root.join("repo/src/sort.rs");
         let workspace_root = super::find_workspace_root(std::slice::from_ref(&change));
-        let changes = super::normalize_change_paths(std::slice::from_ref(&change), workspace_root.as_deref());
+        let changes =
+            super::normalize_change_paths(std::slice::from_ref(&change), workspace_root.as_deref());
 
         assert_eq!(changes, vec!["src/sort.rs".to_string()]);
         assert!(
@@ -500,7 +504,10 @@ name: "边界"
 
     #[test]
     fn normalize_pattern_extracts_first_backtick_span() {
-        assert_eq!(super::normalize_pattern("`src/**` — all source changes"), "src/**");
+        assert_eq!(
+            super::normalize_pattern("`src/**` — all source changes"),
+            "src/**"
+        );
         assert_eq!(super::normalize_pattern("src/**"), "src/**");
         assert_eq!(super::normalize_pattern("`a/b` x `c`"), "a/b");
     }

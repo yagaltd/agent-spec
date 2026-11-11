@@ -102,7 +102,8 @@ fn collect_allowed_patterns(sections: &[Section]) -> Vec<String> {
     for section in sections {
         if let Section::Boundaries { items, .. } = section {
             for item in items {
-                if item.category == BoundaryCategory::Allow && looks_like_path_boundary(&item.text) {
+                if item.category == BoundaryCategory::Allow && looks_like_path_boundary(&item.text)
+                {
                     allowed.push(normalize_pattern(&item.text));
                 }
             }
@@ -269,10 +270,7 @@ fn extract_summary(lines: &[&str]) -> String {
     for line in lines.iter().take(5) {
         let trimmed = line.trim();
         if trimmed.starts_with("//!") {
-            return trimmed
-                .trim_start_matches("//!")
-                .trim()
-                .to_string();
+            return trimmed.trim_start_matches("//!").trim().to_string();
         }
     }
 
@@ -408,14 +406,9 @@ fn is_gitignored(rel_path: &str, rules: &[String]) -> bool {
 }
 
 /// Build a task sketch from scenario dependencies using topological sort.
-fn build_task_sketch(
-    scenarios: &[crate::spec_core::Scenario],
-    sections: &[Section],
-) -> TaskSketch {
+fn build_task_sketch(scenarios: &[crate::spec_core::Scenario], sections: &[Section]) -> TaskSketch {
     if scenarios.is_empty() {
-        return TaskSketch {
-            groups: Vec::new(),
-        };
+        return TaskSketch { groups: Vec::new() };
     }
 
     let n = scenarios.len();
@@ -473,11 +466,8 @@ fn build_task_sketch(
                 .collect();
 
             // Collect boundary paths from scenario step text
-            let boundary_paths = collect_boundary_paths_for_scenarios(
-                &layer_scenarios,
-                scenarios,
-                sections,
-            );
+            let boundary_paths =
+                collect_boundary_paths_for_scenarios(&layer_scenarios, scenarios, sections);
 
             // Collect test selectors
             let test_selectors: Vec<String> = layer_scenarios
@@ -518,8 +508,7 @@ fn collect_boundary_paths_for_scenarios(
         let scenario = &scenarios[idx];
         for step in &scenario.steps {
             for pattern in &allowed {
-                if (step.text.contains(pattern)
-                    || pattern_base_mentioned(&step.text, pattern))
+                if (step.text.contains(pattern) || pattern_base_mentioned(&step.text, pattern))
                     && !paths.contains(pattern)
                 {
                     paths.push(pattern.clone());
@@ -560,10 +549,7 @@ pub fn format_plan_text(ctx: &PlanContext) -> String {
     if ctx.codebase_context.files.is_empty() {
         out.push_str("(no matching files found)\n");
     } else {
-        out.push_str(&format!(
-            "Files ({}):\n",
-            ctx.codebase_context.files.len()
-        ));
+        out.push_str(&format!("Files ({}):\n", ctx.codebase_context.files.len()));
         for file in &ctx.codebase_context.files {
             if file.summary.is_empty() {
                 out.push_str(&format!("  - {}\n", file.path));
@@ -722,15 +708,21 @@ pub fn format_plan_prompt(ctx: &PlanContext) -> String {
     out.push_str("After implementing each scenario group:\n");
     out.push_str("1. **Spec compliance**: Execute `agent-spec lifecycle` with that group's test selectors. All must show `pass`.\n");
     out.push_str("2. **Code quality**: Review for dead code, `.unwrap()` in production paths, boundary violations, unnecessary complexity.\n\n");
-    out.push_str("Do NOT proceed to the next group until both stages pass for the current group.\n\n");
+    out.push_str(
+        "Do NOT proceed to the next group until both stages pass for the current group.\n\n",
+    );
 
     out.push_str("### Status Reporting\n");
     out.push_str("After each scenario group, report your status:\n");
     out.push_str("- **DONE** — All scenarios in this group pass lifecycle verification\n");
-    out.push_str("- **DONE_WITH_CONCERNS** — Scenarios pass but you have doubts (explain what and why)\n");
+    out.push_str(
+        "- **DONE_WITH_CONCERNS** — Scenarios pass but you have doubts (explain what and why)\n",
+    );
     out.push_str("- **NEEDS_CONTEXT** — You need information not provided in the contract or codebase context\n");
     out.push_str("- **BLOCKED** — You cannot complete this group (explain the blocker)\n\n");
-    out.push_str("If BLOCKED: do not attempt workarounds. Report the blocker and wait for guidance.\n");
+    out.push_str(
+        "If BLOCKED: do not attempt workarounds. Report the blocker and wait for guidance.\n",
+    );
 
     out
 }
@@ -740,8 +732,8 @@ pub fn format_plan_prompt(ctx: &PlanContext) -> String {
 mod tests {
     use super::*;
     use crate::spec_core::{
-        Boundary, BoundaryCategory, ResolvedSpec, Scenario, Section, Span, SpecDocument,
-        SpecLevel, SpecMeta, Step, StepKind, TestSelector,
+        Boundary, BoundaryCategory, ResolvedSpec, Scenario, Section, Span, SpecDocument, SpecLevel,
+        SpecMeta, Step, StepKind, TestSelector,
     };
 
     fn make_test_contract() -> TaskContract {
@@ -831,18 +823,14 @@ mod tests {
                     depends: vec![],
                     estimate: None,
                 },
-                sections: vec![
-                    Section::Boundaries {
-                        items: vec![
-                            Boundary {
-                                category: BoundaryCategory::Allow,
-                                text: "src/spec_gateway/**".into(),
-                                span: Span::default(),
-                            },
-                        ],
+                sections: vec![Section::Boundaries {
+                    items: vec![Boundary {
+                        category: BoundaryCategory::Allow,
+                        text: "src/spec_gateway/**".into(),
                         span: Span::default(),
-                    },
-                ],
+                    }],
+                    span: Span::default(),
+                }],
                 source_path: std::path::PathBuf::new(),
             },
             inherited_constraints: Vec::new(),
@@ -1007,7 +995,9 @@ mod tests {
     #[test]
     fn test_plan_prompt_format_is_self_contained() {
         let mut contract = make_test_contract();
-        contract.must.push("inherited constraint from project".into());
+        contract
+            .must
+            .push("inherited constraint from project".into());
 
         let resolved = make_test_resolved();
         let ctx = build_plan_context(
@@ -1098,10 +1088,7 @@ mod tests {
         let code_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let ctx = build_plan_context(&contract, &resolved, code_dir, ScanDepth::Shallow);
 
-        assert!(
-            !ctx.warnings.is_empty(),
-            "should warn about missing path"
-        );
+        assert!(!ctx.warnings.is_empty(), "should warn about missing path");
         assert!(
             ctx.warnings.iter().any(|w| w.contains("nonexistent")),
             "warning should mention the missing path"

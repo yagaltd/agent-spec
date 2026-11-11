@@ -1,11 +1,11 @@
 mod ai_verifier;
 mod bombadil_verifier;
 mod boundaries;
-mod bun_test_verifier;
-mod complexity;
+pub mod bun_test_verifier;
+pub mod complexity;
 mod node_test_verifier;
 mod structural;
-mod tdd_guard_verifier;
+pub mod tdd_guard_verifier;
 mod test_verifier;
 
 use std::collections::HashSet;
@@ -139,15 +139,13 @@ pub fn run_verification(
         let results = verifier.verify(ctx)?;
         for result in results {
             if !covered_scenarios.insert(result.scenario_name.clone()) {
-                if result.verdict != Verdict::Skip {
-                    if let Some(existing) = all_results
+                if result.verdict != Verdict::Skip
+                    && let Some(existing) = all_results
                         .iter_mut()
                         .find(|existing| existing.scenario_name == result.scenario_name)
-                    {
-                        if existing.verdict == Verdict::Skip {
-                            *existing = result;
-                        }
-                    }
+                    && existing.verdict == Verdict::Skip
+                {
+                    *existing = result;
                 }
                 continue;
             }

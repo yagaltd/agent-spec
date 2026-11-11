@@ -1,6 +1,4 @@
-use crate::spec_core::{
-    Evidence, ScenarioResult, SpecResult, StepVerdict, Verdict,
-};
+use crate::spec_core::{Evidence, ScenarioResult, SpecResult, StepVerdict, Verdict};
 use crate::spec_verify::VerificationContext;
 use crate::spec_verify::Verifier;
 
@@ -165,10 +163,7 @@ impl Verifier for BombadilVerifier {
     }
 }
 
-fn skip_all(
-    resolved: &crate::spec_core::ResolvedSpec,
-    reason: &str,
-) -> Vec<ScenarioResult> {
+fn skip_all(resolved: &crate::spec_core::ResolvedSpec, reason: &str) -> Vec<ScenarioResult> {
     resolved
         .all_scenarios
         .iter()
@@ -188,10 +183,7 @@ fn skip_all(
 
 /// Look for a bombadil spec file that matches the scenario name
 fn find_bombadil_spec(code_path: &str, scenario_name: &str) -> Option<String> {
-    let slug = scenario_name
-        .to_lowercase()
-        .replace(' ', "-")
-        .replace('_', "-");
+    let slug = scenario_name.to_lowercase().replace([' ', '_'], "-");
 
     let candidates = [
         format!("{code_path}/bombadil/{slug}.spec.ts"),

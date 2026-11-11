@@ -1,6 +1,6 @@
 use crate::spec_core::{
-    Boundary, BoundaryCategory, Constraint, ConstraintCategory, ReviewMode, Scenario,
-    ScenarioMode, Section, Span, SpecDocument, SpecError, SpecResult, Step, TestSelector,
+    Boundary, BoundaryCategory, Constraint, ConstraintCategory, ReviewMode, Scenario, ScenarioMode,
+    Section, Span, SpecDocument, SpecError, SpecResult, Step, TestSelector,
 };
 use std::path::{Path, PathBuf};
 

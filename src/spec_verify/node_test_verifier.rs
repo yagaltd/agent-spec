@@ -60,6 +60,10 @@ impl Verifier for NodeTestVerifier {
             let selector_label = binding.selector.label();
             let output = Command::new("node")
                 .arg("--test")
+                // Node >= 22 may not default to TAP output for piped stdout;
+                // request it explicitly so parse_tap_for_test always sees TAP.
+                .arg("--test-reporter=tap")
+                .arg("--test-reporter-destination=stdout")
                 .arg("--test-name-pattern")
                 .arg(&binding.selector.filter)
                 .current_dir(&project_root)
@@ -376,13 +380,19 @@ mod tests {
     #[test]
     fn parses_passing_tap_point() {
         let tap = "TAP version 13\nok 1 - test_passing_case\n1..1\n";
-        assert_eq!(parse_tap_for_test(tap, "test_passing_case"), TapOutcome::Passed);
+        assert_eq!(
+            parse_tap_for_test(tap, "test_passing_case"),
+            TapOutcome::Passed
+        );
     }
 
     #[test]
     fn parses_failing_tap_point() {
         let tap = "TAP version 13\nnot ok 1 - test_failing_case\n1..1\n";
-        assert_eq!(parse_tap_for_test(tap, "test_failing_case"), TapOutcome::Failed);
+        assert_eq!(
+            parse_tap_for_test(tap, "test_failing_case"),
+            TapOutcome::Failed
+        );
     }
 
     #[test]
@@ -404,8 +414,14 @@ test('test_example', () => {});
 
         let bindings = extract_bindings(source);
         assert_eq!(bindings.len(), 2);
-        assert_eq!(bindings[0], ("场景一".to_string(), "test_example".to_string()));
-        assert_eq!(bindings[1], ("场景二".to_string(), "test_example".to_string()));
+        assert_eq!(
+            bindings[0],
+            ("场景一".to_string(), "test_example".to_string())
+        );
+        assert_eq!(
+            bindings[1],
+            ("场景二".to_string(), "test_example".to_string())
+        );
     }
 
     #[test]
@@ -416,9 +432,18 @@ test('test_example', () => {});
 
     #[test]
     fn extracts_test_call_name_across_quote_styles() {
-        assert_eq!(extract_test_call_name("test('a', () => {})"), Some("a".into()));
-        assert_eq!(extract_test_call_name("test(\"b\", () => {})"), Some("b".into()));
-        assert_eq!(extract_test_call_name("test(`c`, () => {})"), Some("c".into()));
+        assert_eq!(
+            extract_test_call_name("test('a', () => {})"),
+            Some("a".into())
+        );
+        assert_eq!(
+            extract_test_call_name("test(\"b\", () => {})"),
+            Some("b".into())
+        );
+        assert_eq!(
+            extract_test_call_name("test(`c`, () => {})"),
+            Some("c".into())
+        );
         assert_eq!(extract_test_call_name("const x = 1;"), None);
     }
 }

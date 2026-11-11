@@ -1,6 +1,4 @@
-use crate::spec_core::{
-    LintDiagnostic, Scenario, Section, Severity, SpecDocument,
-};
+use crate::spec_core::{LintDiagnostic, Scenario, Section, Severity, SpecDocument};
 
 use super::pipeline::SpecLinter;
 
@@ -203,7 +201,10 @@ mod tests {
             Some("test_sort_idempotent"),
         );
         let looks_property = looks_like_property_test(&scenario);
-        assert!(looks_property, "should detect property test from name + steps");
+        assert!(
+            looks_property,
+            "should detect property test from name + steps"
+        );
     }
 
     #[test]
@@ -237,7 +238,9 @@ mod tests {
         // The steps contain "fast-check" so has_framework_hint should be true
         let steps_hint = scenario.steps.iter().any(|step| {
             let text_lower = step.text.to_lowercase();
-            PROPERTY_FRAMEWORK_HINTS.iter().any(|hint| text_lower.contains(hint))
+            PROPERTY_FRAMEWORK_HINTS
+                .iter()
+                .any(|hint| text_lower.contains(hint))
         });
         assert!(steps_hint, "step text should hint at property framework");
     }

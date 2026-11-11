@@ -77,7 +77,7 @@ fn extract_quality_constraints(spec: &ResolvedSpec) -> Vec<QualityConstraint> {
 /// - 新增代码行数不应超过删除行数的 "3" 倍
 /// - net lines added must not exceed "3" times lines deleted
 /// - line ratio <= 3
-fn parse_line_ratio(text: &str) -> Option<f64> {
+pub fn parse_line_ratio(text: &str) -> Option<f64> {
     // Pattern 1: Chinese – 不超过删除行数的 "N" 倍
     if (text.contains("不超过") || text.contains("不应超过"))
         && text.contains("删除")
@@ -152,17 +152,21 @@ fn extract_number_before_keyword(text: &str, keyword: &str) -> Option<f64> {
 }
 
 /// Parse the trailing numeric portion of a string.
-fn parse_trailing_number(s: &str) -> Option<f64> {
+pub fn parse_trailing_number(s: &str) -> Option<f64> {
+    // Walk char boundaries from the end so a trailing digit run preceded by a
+    // multibyte char (e.g. "中12") never slices inside a char.
     let num_start = s
-        .rfind(|c: char| !c.is_ascii_digit() && c != '.')
-        .map(|i| i + 1)
+        .char_indices()
+        .rev()
+        .find(|(_, c)| !c.is_ascii_digit() && *c != '.')
+        .map(|(i, c)| i + c.len_utf8())
         .unwrap_or(0);
     let candidate = &s[num_start..];
     candidate.parse::<f64>().ok()
 }
 
 /// Parse the first number found in a string.
-fn parse_first_number(s: &str) -> Option<f64> {
+pub fn parse_first_number(s: &str) -> Option<f64> {
     let trimmed = s.trim();
     let end = trimmed
         .find(|c: char| !c.is_ascii_digit() && c != '.')
@@ -179,21 +183,13 @@ fn parse_first_number(s: &str) -> Option<f64> {
 fn check_line_ratio(ctx: &VerificationContext, max_ratio: f64) -> ScenarioResult {
     let (added, deleted) = compute_diff_stats(&ctx.change_paths);
     let actual_ratio = if deleted == 0 {
-        if added == 0 {
-            0.0
-        } else {
-            f64::INFINITY
-        }
+        if added == 0 { 0.0 } else { f64::INFINITY }
     } else {
         added as f64 / deleted as f64
     };
 
     let passed = actual_ratio <= max_ratio;
-    let verdict = if passed {
-        Verdict::Pass
-    } else {
-        Verdict::Fail
-    };
+    let verdict = if passed { Verdict::Pass } else { Verdict::Fail };
 
     ScenarioResult {
         scenario_name: "[complexity] code quality gate".to_string(),
@@ -261,7 +257,7 @@ fn try_git_numstat(extra_args: &[&str], paths: &[PathBuf]) -> Option<(usize, usi
 ///
 /// Each line has the format: `<added>\t<deleted>\t<path>`
 /// Binary files show `-` for both counts; we skip those.
-fn parse_numstat_output(output: &str) -> (usize, usize) {
+pub fn parse_numstat_output(output: &str) -> (usize, usize) {
     let mut total_added: usize = 0;
     let mut total_deleted: usize = 0;
 
@@ -287,8 +283,8 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::spec_core::{
-        Constraint, ConstraintCategory, ResolvedSpec, Section, Span, SpecDocument,
-        SpecLevel, SpecMeta, Verdict,
+        Constraint, ConstraintCategory, ResolvedSpec, Section, Span, SpecDocument, SpecLevel,
+        SpecMeta, Verdict,
     };
     use crate::spec_verify::{AiMode, VerificationContext, Verifier};
 
@@ -381,10 +377,7 @@ mod tests {
         // With nonexistent files, git diff returns (0,0), ratio is 0.0, which passes.
         // The important thing is the verifier runs without error and produces a result.
         assert!(!results.is_empty());
-        assert_eq!(
-            results[0].scenario_name,
-            "[complexity] code quality gate"
-        );
+        assert_eq!(results[0].scenario_name, "[complexity] code quality gate");
     }
 
     #[test]
@@ -475,6 +468,19 @@ mod tests {
     fn test_parse_line_ratio_no_match() {
         assert_eq!(parse_line_ratio("use clippy for linting"), None);
         assert_eq!(parse_line_ratio("no .unwrap() calls allowed"), None);
+    }
+
+    /// Regression (found by fuzz/fuzz_targets/fuzz_tool_output.rs):
+    /// parse_trailing_number used to slice at `rfind(...) + 1`, which can land
+    /// inside a multibyte char and panic. It must be total on any input.
+    #[test]
+    fn test_parse_trailing_number_multibyte_never_panics() {
+        assert_eq!(super::parse_trailing_number("中12"), Some(12.0));
+        assert_eq!(super::parse_trailing_number("🎉7"), Some(7.0));
+        assert_eq!(super::parse_trailing_number("中文"), None);
+        assert_eq!(super::parse_trailing_number("42"), Some(42.0));
+        assert_eq!(super::parse_trailing_number("abc"), None);
+        assert_eq!(super::parse_trailing_number(""), None);
     }
 
     #[test]

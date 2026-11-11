@@ -1,0 +1,40 @@
+[package]
+name = "agent-spec-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.agent-spec]
+path = ".."
+
+[[bin]]
+name = "fuzz_spec_parse"
+path = "fuzz_targets/fuzz_spec_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_tool_output"
+path = "fuzz_targets/fuzz_tool_output.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_report_format"
+path = "fuzz_targets/fuzz_report_format.rs"
+test = false
+doc = false
+bench = false
+
+# Deliberately NOT a member of the parent workspace: `cargo test` / `cargo build`
+# in the repo root never builds this crate. Run targets via:
+#   cargo +nightly fuzz run fuzz_spec_parse
+[workspace]
