@@ -124,6 +124,9 @@ enum Commands {
         /// Fail when any scenario is skipped (default: skips do not fail the run)
         #[arg(long)]
         fail_on_skip: bool,
+        /// Reuse the cached verification report when spec, layers, code and git state are unchanged
+        #[arg(long)]
+        cache: bool,
     },
     /// Compatibility alias for the contract view
     Brief {
@@ -158,6 +161,9 @@ enum Commands {
         /// Minimum quality score
         #[arg(long, default_value = "0.6")]
         min_score: f64,
+        /// Reuse cached verification reports when spec, code and git state are unchanged
+        #[arg(long)]
+        cache: bool,
     },
     /// Generate a human-readable contract review summary
     Explain {
@@ -298,6 +304,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             resume,
             review_mode,
             fail_on_skip,
+            cache,
         } => cmd_lifecycle(
             &spec,
             &code,
@@ -312,6 +319,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             resume,
             &review_mode,
             fail_on_skip,
+            cache,
         ),
         Commands::Brief { spec, format } => cmd_brief(&spec, &format),
         Commands::Contract { spec, format } => cmd_contract(&spec, &format),
@@ -321,7 +329,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             change,
             change_scope,
             min_score,
-        } => cmd_guard(&spec_dir, &code, &change, &change_scope, min_score),
+            cache,
+        } => cmd_guard(&spec_dir, &code, &change, &change_scope, min_score, cache),
         Commands::Explain {
             spec,
             code,
@@ -515,6 +524,7 @@ fn cmd_lifecycle(
     resume: Option<Option<String>>,
     review_mode: &str,
     fail_on_skip: bool,
+    cache: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Validate --resume requires --run-log-dir
     let resume_mode = if let Some(ref mode_opt) = resume {
@@ -538,6 +548,7 @@ fn cmd_lifecycle(
 
     let gw = agent_spec::spec_gateway::SpecGateway::load(spec)?;
     let change_scope = GitChangeScope::parse(change_scope)?;
+    let ai_mode_label = ai_mode;
     let ai_mode = parse_ai_mode(ai_mode)?;
     let effective_changes = resolve_command_change_paths(spec, code, change, change_scope)?;
 
@@ -581,7 +592,30 @@ fn cmd_lifecycle(
     };
 
     // Stage 2: Verify (respecting layers filter)
-    let verify_report = gw.verify_with_changes_and_ai_mode(code, &effective_changes, ai_mode)?;
+    //
+    // `--cache` is opt-in and additive: a hit replays the report the same
+    // pipeline produced for the same inputs, a miss recomputes and stores it.
+    // Resume merges a checkpoint that lives outside the key, so it bypasses the
+    // cache rather than risk a stale merge.
+    let (verify_report, cache_status) = if cache && resume_mode.is_none() {
+        let inputs = agent_spec::spec_gateway::CacheInputs {
+            spec,
+            code,
+            layers: active_layers.as_deref(),
+            change_paths: &effective_changes,
+            ai_mode: ai_mode_label,
+        };
+        let cached = gw.verify_cached(&inputs, ai_mode)?;
+        if let Some(note) = &cached.note {
+            eprintln!("agent-spec cache: {note}");
+        }
+        (cached.report, cached.status)
+    } else {
+        (
+            gw.verify_with_changes_and_ai_mode(code, &effective_changes, ai_mode)?,
+            agent_spec::spec_gateway::CacheStatus::Miss,
+        )
+    };
 
     // If layers filter is active, filter results to only matching layers
     let verify_report = if let Some(ref layer_list) = active_layers {
@@ -684,8 +718,14 @@ fn cmd_lifecycle(
         if !optimization_candidates.is_empty() {
             json_out["optimization_candidates"] = serde_json::json!(optimization_candidates);
         }
+        if cache {
+            json_out["cache"] = serde_json::json!(cache_status.as_str());
+        }
         println!("{}", serde_json::to_string_pretty(&json_out)?);
     } else {
+        if cache {
+            eprintln!("agent-spec cache: {}", cache_status.as_str());
+        }
         if let Some(ref lr) = lint_report {
             println!("=== Lint Report ===");
             println!("{}", gw.format_lint_report(lr, format));
@@ -781,6 +821,7 @@ fn cmd_guard(
     change: &[PathBuf],
     change_scope: &str,
     min_score: f64,
+    cache: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !spec_dir.exists() {
         // No specs directory → nothing to guard, pass silently
@@ -811,6 +852,7 @@ fn cmd_guard(
     }
 
     let mut errors = Vec::new();
+    let mut cache_hits = 0usize;
 
     for spec_file in &spec_files {
         let gw = match agent_spec::spec_gateway::SpecGateway::load(spec_file) {
@@ -827,7 +869,31 @@ fn cmd_guard(
         }
 
         // Verify check (only structural — fast enough for pre-commit)
-        match gw.verify_with_changes(code, &effective_changes) {
+        let verification = if cache {
+            let inputs = agent_spec::spec_gateway::CacheInputs {
+                spec: spec_file,
+                code,
+                layers: None,
+                change_paths: &effective_changes,
+                ai_mode: "off",
+            };
+            match gw.verify_cached(&inputs, agent_spec::spec_verify::AiMode::Off) {
+                Ok(cached) => {
+                    if let Some(note) = &cached.note {
+                        eprintln!("agent-spec cache: {note}");
+                    }
+                    if cached.status == agent_spec::spec_gateway::CacheStatus::Hit {
+                        cache_hits += 1;
+                    }
+                    Ok(cached.report)
+                }
+                Err(err) => Err(err),
+            }
+        } else {
+            gw.verify_with_changes(code, &effective_changes)
+        };
+
+        match verification {
             Ok(report) => {
                 if !gw.is_passing(&report) {
                     errors.push(format!(
@@ -844,7 +910,14 @@ fn cmd_guard(
     }
 
     if errors.is_empty() {
-        eprintln!("agent-spec guard: {} spec(s) passed", spec_files.len());
+        if cache {
+            eprintln!(
+                "agent-spec guard: {} spec(s) passed [cache: {cache_hits} hit(s)]",
+                spec_files.len()
+            );
+        } else {
+            eprintln!("agent-spec guard: {} spec(s) passed", spec_files.len());
+        }
         Ok(())
     } else {
         eprintln!("agent-spec guard: FAILED");

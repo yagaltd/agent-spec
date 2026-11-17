@@ -31,3 +31,6 @@ Thumbs.db
 # agent-spec run logs
 .agent-spec/
 .pi-subagents/
+
+# agent-spec verification cache
+.agent-spec-cache/

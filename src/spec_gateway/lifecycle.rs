@@ -196,6 +196,24 @@ impl SpecGateway {
         )
     }
 
+    /**
+     * @cc [label:verification-cache] gate-never-passes-on-a-layer-that-did-not-run
+     * Verify through the opt-in cross-run cache. On a miss the full pipeline
+     * runs; on a hit the report the pipeline produced for exactly these inputs
+     * is replayed, so no layer is skipped or weakened. `ai_mode` and the layer
+     * filter are part of the key, so a hit never describes a different verifier
+     * set than the request and the outer gate decision is unchanged.
+     */
+    pub fn verify_cached(
+        &self,
+        inputs: &super::CacheInputs<'_>,
+        ai_mode: AiMode,
+    ) -> SpecResult<super::CachedRun> {
+        super::cache::verify_cached(inputs, || {
+            self.verify_with_changes_and_ai_mode(inputs.code, inputs.change_paths, ai_mode)
+        })
+    }
+
     fn run_verify(
         &self,
         code_paths: Vec<PathBuf>,
