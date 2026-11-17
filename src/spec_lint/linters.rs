@@ -2,6 +2,7 @@ use crate::spec_core::{
     LintDiagnostic, Scenario, Section, Severity, Span, SpecDocument, SpecLevel, StepKind,
     TestSelector,
 };
+use crate::spec_verify::{looks_like_path_boundary, normalize_pattern, path_matches_pattern};
 use std::collections::{HashMap, HashSet};
 
 use super::pipeline::SpecLinter;
@@ -2031,11 +2032,242 @@ fn dfs_find_cycle<'a>(
     None
 }
 
+// =============================================================================
+// 16. BoundariesPathLinter - a criterion citing a path outside the spec's own
+//     Allowed Changes is a contract that cannot be satisfied; catch it at lint
+//     time instead of paying review rounds for it (plan-064 defect class).
+//     Backticked commands (`cargo test`) and URLs are never path-like; only
+//     criteria text is scanned (the Allowed lines themselves never are).
+// =============================================================================
+
+pub struct BoundariesPathLinter;
+
+impl SpecLinter for BoundariesPathLinter {
+    fn name(&self) -> &str {
+        "boundaries-path"
+    }
+
+    fn lint(&self, doc: &SpecDocument) -> Vec<LintDiagnostic> {
+        let mut diags = Vec::new();
+
+        if doc.meta.level != SpecLevel::Task {
+            return diags;
+        }
+
+        // Allowed Changes entries, normalized to path globs.
+        let allowed: Vec<String> = doc
+            .sections
+            .iter()
+            .filter_map(|section| match section {
+                Section::Boundaries { items, .. } => Some(items),
+                _ => None,
+            })
+            .flatten()
+            .filter(|b| b.category == crate::spec_core::BoundaryCategory::Allow)
+            .filter(|b| looks_like_path_boundary(&b.text))
+            .map(|b| normalize_pattern(&b.text))
+            .collect();
+
+        // Criteria text only: Intent plus scenarios.
+        let mut scanned: Vec<(String, String, Span)> = Vec::new();
+        for section in &doc.sections {
+            match section {
+                Section::Intent { content, span } => {
+                    scanned.push((content.clone(), "Intent".to_string(), *span));
+                }
+                Section::AcceptanceCriteria { scenarios, .. } => {
+                    for sc in scenarios {
+                        let mut text = sc.name.clone();
+                        for step in &sc.steps {
+                            text.push('\n');
+                            text.push_str(&step.text);
+                        }
+                        scanned.push((text, format!("scenario '{}'", sc.name), sc.span));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        for (text, where_, span) in scanned {
+            for token in backticked_tokens(&text) {
+                if !is_path_like_token(&token) {
+                    continue;
+                }
+                if allowed.iter().any(|entry| entry_covers(entry, &token)) {
+                    continue;
+                }
+                diags.push(LintDiagnostic {
+                    rule: "boundaries-path".into(),
+                    severity: Severity::Error,
+                    message: format!("path '{token}' cited in {where_} is outside Allowed Changes"),
+                    span: Span::line(span.start_line),
+                    suggestion: Some("add the path to Allowed Changes, or fix the citation".into()),
+                });
+            }
+        }
+
+        diags
+    }
+}
+
+/// Inline backtick spans, line by line; fenced-code lines are skipped so
+/// triple-backtick fences never pair up as tokens.
+fn backticked_tokens(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut in_fence = false;
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        let mut rest = line;
+        while let Some(start) = rest.find('`') {
+            let after = &rest[start + 1..];
+            match after.find('`') {
+                Some(end) => {
+                    tokens.push(after[..end].to_string());
+                    rest = &after[end + 1..];
+                }
+                None => break, // unbalanced backtick on this line
+            }
+        }
+    }
+    tokens
+}
+
+/// Path-like iff the token contains '/', has no '://' scheme and no whitespace
+/// (so backticked commands like `cargo test` and URLs are never flagged).
+fn is_path_like_token(token: &str) -> bool {
+    token.contains('/') && !token.contains("://") && !token.contains(char::is_whitespace)
+}
+
+/// An Allowed Changes entry covers a token when they are equal, the token
+/// descends from the entry, or the entry's glob (`**` / `*`) matches it.
+fn entry_covers(entry: &str, token: &str) -> bool {
+    entry == token || token.starts_with(&format!("{entry}/")) || path_matches_pattern(entry, token)
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::len_zero, clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::spec_lint::LintPipeline;
     use crate::spec_parser::parse_spec_from_str;
+
+    /// Run the default pipeline and keep only boundaries-path findings.
+    fn boundaries_diags(input: &str) -> Vec<LintDiagnostic> {
+        let doc = parse_spec_from_str(input).unwrap();
+        LintPipeline::with_defaults()
+            .run(&doc)
+            .diagnostics
+            .into_iter()
+            .filter(|d| d.rule == "boundaries-path")
+            .collect()
+    }
+
+    #[test]
+    fn lint_flags_path_outside_allowed() {
+        let input = r#"spec: task
+name: "flag"
+---
+
+## Intent
+
+Fix the loader.
+
+## Boundaries
+
+### Allowed Changes
+- src/**
+
+## Completion Criteria
+
+Scenario: docs updated
+  Test: docs_updated
+  Given `docs/api.md` exists
+  When the build runs
+  Then `docs/api.md` reflects the loader
+"#;
+        let diags = boundaries_diags(input);
+        assert_eq!(
+            diags.len(),
+            2,
+            "both citations must be flagged: {:?}",
+            diags
+        );
+        assert!(diags.iter().all(|d| d.severity == Severity::Error));
+        for d in &diags {
+            assert!(d.message.contains("docs/api.md"), "{}", d.message);
+            assert!(
+                d.message.contains("docs updated"),
+                "must name the criterion: {}",
+                d.message
+            );
+        }
+    }
+
+    #[test]
+    fn lint_accepts_paths_inside_allowed() {
+        let input = r#"spec: task
+name: "accept"
+---
+
+## Intent
+
+Update the parsers.
+
+## Boundaries
+
+### Allowed Changes
+- src/**
+- docs/**
+
+## Completion Criteria
+
+Scenario: paths ok
+  Test: paths_ok
+  Given `src/x.rs` compiles
+  When `docs/a.md` renders
+  Then both pass
+"#;
+        assert!(
+            boundaries_diags(input).is_empty(),
+            "paths covered by Allowed globs must not be flagged"
+        );
+    }
+
+    #[test]
+    fn lint_ignores_commands_and_urls() {
+        let input = r#"spec: task
+name: "cmd"
+---
+
+## Intent
+
+Run the suite.
+
+## Boundaries
+
+### Allowed Changes
+- src/**
+
+## Completion Criteria
+
+Scenario: commands ok
+  Test: commands_ok
+  Given the repo builds
+  When `cargo test` passes and `https://example.com/a.md` resolves
+  Then no findings
+"#;
+        assert!(
+            boundaries_diags(input).is_empty(),
+            "backticked commands and URLs are never path-like"
+        );
+    }
 
     #[test]
     fn test_vague_verb_linter() {

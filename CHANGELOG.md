@@ -1,3 +1,23 @@
+## v0.3.2 — boundaries lint + ledger check (2026-11-17)
+
+- **lint(boundaries): criteria paths must resolve inside Allowed Changes** — the
+  defect class that cost plan 064 four review rounds: a spec whose criterion
+  depends on a path its own Boundaries forbid (e.g. criterion cites `docs/api.md`
+  while Allowed lists only `src/**`) used to surface only during review, after the
+  contract had already been executed against. The rule joins the existing lint
+  pipeline (`spec_lint::LintPipeline::with_defaults`, no new subcommand): backticked
+  tokens from Intent, Scenarios and Completion Criteria are path-like when they
+  contain `/`, have no `://` scheme and no space; each must resolve against the
+  spec's Allowed Changes entries (equal, descendant, or `**`/`*` glob cover).
+  Unresolved paths are error-level findings naming the path and the criterion.
+  Backticked commands (`cargo test`) and URLs are never flagged; only criteria
+  text is scanned — the Allowed lines themselves never are.
+- **plan-check validates `## Ledger Resolution`** — when a plan carries the
+  section, every row's Disposition cell must be exactly one token:
+  `done(<ref>)`, `closed(<reason>)` or `deferred(trigger: <condition>)`
+  (whitespace-trimmed; prose after the token is malformed). Missing section is a
+  no-op; malformed rows fail plan-check naming the Item cell and line number.
+
 ## v0.3.1 — verification cache (opt-in) + boundary fixes (2026-11-17)
 
 - **`--cache` on `lifecycle` / `guard`** — cross-run memo of the whole verification report,
