@@ -1,3 +1,20 @@
+## v0.3.1 — verification cache (opt-in) + boundary fixes (2026-11-17)
+
+- **`--cache` on `lifecycle` / `guard`** — cross-run memo of the whole verification report,
+  keyed on spec bytes, layer set, `--ai-mode`, change paths, code root and git state (HEAD +
+  `status --porcelain -uall` + a content hash of every dirty path), plus the crate version.
+  Inline FNV-1a, no new dependency; entries under `<code>/.agent-spec-cache/` (gitignored).
+  Measured on this repo: `guard --spec-dir specs` **57.4 s cold → 0.69 s warm (83x)**,
+  28 specs either way; a single `lifecycle` 106-185x. A hit must be byte-identical to the cold
+  report except `"cache": "hit"`, and an unwritable or non-git cache degrades to a loud miss —
+  never a silent pass. Opt-in: a plain run creates no cache directory.
+- **fix(boundaries): dotfiles are boundary paths** — `looks_like_path_boundary` dropped any
+  pattern without a separator or a known suffix, so an explicitly allowed `.gitignore` became
+  an automatic violation.
+- **fix(boundaries): trailing annotations are prose** — `normalize_pattern` kept ` (new)`, so
+  `src/x.rs (new)` could never match a change path. Both found by the cache spike verifying its
+  own contract; pinned by three tests.
+
 # Changelog
 
 ## v0.3.0 — lib/bin split + fuzz-driven correctness fixes (released 2026-11-17)
