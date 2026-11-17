@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.0 — lib/bin split + fuzz-driven correctness fixes (released 2026-11-17)
 
 - **fix: `parse_trailing_number` multibyte panic** — `parse_trailing_number` sliced at
   `rfind(...) + 1`, which can land inside a multibyte UTF-8 char (e.g. `"中12"`) and
@@ -19,8 +19,6 @@
 - **clippy**: replaced `unwrap()`s in plan-check regex compilation (deny
   `clippy::unwrap_used`); collapsed-`if`/derivable-`Default`/`ptr_arg` lint fixes;
   `cargo fmt` applied.
-
-## v0.3.0 — lib/bin split
 
 - **Library target added** — the spec parse / lint / verify engine is now
   importable as a Rust crate (`agent-spec` lib), so consumers (e.g.
