@@ -2665,6 +2665,10 @@ fn check_plan(content: &str) -> PlanCheckResult {
     let (deps, dep_errors) = parse_dependencies(content);
     errors.extend(dep_errors);
 
+    // Validate the ## Ledger Resolution section (no-op when absent)
+    let ledger_errors = validate_ledger_resolution(content);
+    errors.extend(ledger_errors);
+
     // Extract task IDs from spec map
     let tasks = extract_task_ids(content);
 
@@ -2759,6 +2763,101 @@ fn check_plan(content: &str) -> PlanCheckResult {
         warnings,
         tasks,
         dependency_edges: deps,
+    }
+}
+
+/// Validate the plan's `## Ledger Resolution` section (pi-workflows ledger
+/// doctrine): every row's Disposition cell must be exactly one of
+/// `done(<ref>)`, `closed(<reason>)` or `deferred(trigger: <condition>)`.
+/// A plan without the section is a no-op.
+fn validate_ledger_resolution(content: &str) -> Vec<String> {
+    let mut errors = Vec::new();
+    let lines: Vec<&str> = content.lines().collect();
+    let Some(start) = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("## Ledger Resolution"))
+    else {
+        return errors;
+    };
+
+    let mut item_col = 1usize;
+    let mut disposition_col = 2usize;
+
+    for (idx, line) in lines.iter().enumerate().skip(start + 1) {
+        let trimmed = line.trim();
+        if trimmed.starts_with("## ") {
+            break; // next plan section
+        }
+        if !trimmed.starts_with('|') {
+            continue;
+        }
+        let cells: Vec<String> = trimmed
+            .trim_matches('|')
+            .split('|')
+            .map(|cell| cell.trim().to_string())
+            .collect();
+
+        // First table row is the header: locate the Item/Disposition columns
+        // (pinned template positions as fallback), then skip it.
+        if let Some(disp) = cells
+            .iter()
+            .position(|c| c.eq_ignore_ascii_case("disposition"))
+        {
+            disposition_col = disp;
+            item_col = cells
+                .iter()
+                .position(|c| c.eq_ignore_ascii_case("item"))
+                .unwrap_or(1);
+            continue;
+        }
+        // Separator row (|---|) or pre-header prose table line: no tokens.
+        if cells
+            .iter()
+            .all(|c| c.is_empty() || c.chars().all(|ch| ch == '-' || ch == ':'))
+        {
+            continue;
+        }
+
+        let item = cells
+            .get(item_col)
+            .map(String::as_str)
+            .unwrap_or("<no item>");
+        let Some(disposition) = cells.get(disposition_col) else {
+            errors.push(format!(
+                "ledger row '{item}' (line {}): missing Disposition cell",
+                idx + 1
+            ));
+            continue;
+        };
+        if !valid_disposition(disposition) {
+            errors.push(format!(
+                "ledger row '{item}' (line {}): invalid disposition '{disposition}' — expected done(<ref>), closed(<reason>) or deferred(trigger: <condition>)",
+                idx + 1
+            ));
+        }
+    }
+
+    errors
+}
+
+/// The Disposition cell is the token alone (whitespace-trimmed):
+/// `done(<ref>)`, `closed(<reason>)` or `deferred(trigger: <condition>)`.
+fn valid_disposition(cell: &str) -> bool {
+    let Some((kind, rest)) = cell.trim().split_once('(') else {
+        return false;
+    };
+    let Some(inner) = rest.strip_suffix(')') else {
+        return false;
+    };
+    if inner.is_empty() || inner.contains(')') {
+        return false;
+    }
+    match kind {
+        "done" | "closed" => true,
+        "deferred" => inner
+            .strip_prefix("trigger: ")
+            .is_some_and(|condition| !condition.trim().is_empty()),
+        _ => false,
     }
 }
 
@@ -2895,7 +2994,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        GitChangeScope, ResumeMode, RunLogEntry, build_stamp_trailers, checkpoint_path,
+        GitChangeScope, ResumeMode, RunLogEntry, build_stamp_trailers, check_plan, checkpoint_path,
         cmd_init_at, generate_rewrite_parity_template_both, generate_rewrite_parity_template_en,
         generate_rewrite_parity_template_zh, generate_template_both, generate_template_en,
         generate_template_zh, is_spec_file, load_checkpoint, merge_checkpoint_results,
@@ -4852,5 +4951,64 @@ Scenario: pass
         );
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    const LEDGER_HEADER: &str = "## Ledger Resolution\n\
+        \n\
+        | # | Item | Disposition | Note |\n\
+        |---|---|---|---|\n";
+
+    #[test]
+    fn plan_check_validates_ledger_tokens() {
+        // Fully-valid section: done / closed / deferred tokens, one per cell
+        let valid = format!(
+            "{LEDGER_HEADER}\
+             | 1 | docs debt | done(T1) | budgets land |\n\
+             | 2 | bombadil gap | closed(accepted-gap DEC-008) | nothing to do |\n\
+             | 3 | later | deferred(trigger: revisit at v1.0) | wait |\n"
+        );
+        let result = check_plan(&valid);
+        assert!(
+            result.errors.is_empty(),
+            "fully-valid ledger must produce no errors: {:?}",
+            result.errors
+        );
+        assert!(result.valid);
+
+        // One malformed row: wrong token → non-zero exit, row named by Item + line
+        let bad = format!(
+            "{LEDGER_HEADER}\
+             | 1 | docs debt | done(T1) | budgets land |\n\
+             | 5 | bad row | finished(T9) | wrong token |\n"
+        );
+        let result = check_plan(&bad);
+        assert!(!result.valid);
+        assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
+        let err = &result.errors[0];
+        assert!(err.contains("bad row"), "must name the Item cell: {err}");
+        assert!(err.contains("line 6"), "must name the line: {err}");
+        assert!(err.contains("finished(T9)"), "must quote the cell: {err}");
+
+        // The cell is the token alone: prose after the token is malformed
+        let prose = format!(
+            "{LEDGER_HEADER}\
+             | 1 | prose tail | done(T1) plus prose | trailing words |\n"
+        );
+        let result = check_plan(&prose);
+        assert!(!result.valid);
+        assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
+        assert!(result.errors[0].contains("prose tail"));
+    }
+
+    #[test]
+    fn plan_check_ignores_missing_section() {
+        let content = "## Plan\n\
+            \n\
+            Some prose with | pipes | but no ledger heading.\n\
+            \n\
+            ## Lifecycle\n";
+        let result = check_plan(content);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(result.valid);
     }
 }
