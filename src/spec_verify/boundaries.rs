@@ -132,7 +132,11 @@ fn collect_path_boundaries(sections: &[crate::spec_core::Section]) -> (Vec<Strin
 
 pub(crate) fn looks_like_path_boundary(text: &str) -> bool {
     let trimmed = text.trim();
-    trimmed.contains('/')
+    // a dotfile is a path even without a separator or a known suffix
+    // (.gitignore, .env, .golangci.yml) — dropping it made an explicitly
+    // allowed path silently unallowable (20261117 cache-spike finding)
+    (trimmed.starts_with('.') && trimmed.len() > 1 && !trimmed.contains(char::is_whitespace))
+        || trimmed.contains('/')
         || trimmed.contains('\\')
         || trimmed.contains('*')
         || trimmed.ends_with(".rs")
@@ -207,9 +211,14 @@ pub(crate) fn normalize_pattern(pattern: &str) -> String {
         None => pattern,
     };
 
-    base.trim()
-        .trim_matches('`')
-        .replace('\\', "/")
+    let cleaned = base.trim().trim_matches('`').replace('\\', "/");
+    // "src/x.rs (new)" and "src/x.rs — description" are annotated bullets, not
+    // patterns: the annotation made the pattern unmatchable (same finding)
+    let without_annotation = match cleaned.find(" (") {
+        Some(idx) => &cleaned[..idx],
+        None => &cleaned[..],
+    };
+    without_annotation
         .trim_start_matches("./")
         .trim_matches('/')
         .to_string()
@@ -501,6 +510,37 @@ name: "边界"
     }
 
     // ---- regression: decorated bullets keep the description inside the pattern ----
+
+    // Plan 20261117 (cache spike): two false-boundary defects, pinned.
+    #[test]
+    fn looks_like_path_boundary_accepts_dotfiles() {
+        assert!(super::looks_like_path_boundary(".gitignore"));
+        assert!(super::looks_like_path_boundary(".github/workflows/ci.yml"));
+        assert!(!super::looks_like_path_boundary(
+            "use tokio for the runtime"
+        ));
+    }
+
+    #[test]
+    fn normalize_pattern_strips_trailing_annotation() {
+        assert_eq!(
+            super::normalize_pattern("src/spec_gateway/cache.rs (new)"),
+            "src/spec_gateway/cache.rs"
+        );
+        assert_eq!(
+            super::normalize_pattern("`src/x.rs` (new file)"),
+            "src/x.rs"
+        );
+    }
+
+    #[test]
+    fn dotfile_pattern_matches_dotfile_change() {
+        assert!(super::path_matches_pattern(".gitignore", ".gitignore"));
+        assert!(super::path_matches_pattern(
+            ".github/workflows/ci.yml",
+            ".github/workflows/ci.yml"
+        ));
+    }
 
     #[test]
     fn normalize_pattern_extracts_first_backtick_span() {
