@@ -1,5 +1,21 @@
 ## Unreleased
 
+- **fix(lint): a multi-file run no longer aborts on the first unparseable
+  file** — `agent-spec lint a b c` used to propagate the first
+  parse-failure with `?`, so files after the bad one were silently
+  unprocessed and stderr suppression hid it (a combined run in plan-067
+  under-reported and poisoned one durable count). Now every file is
+  attempted: good files get their full report in the chosen format
+  (text/json/md unchanged), parse failures are collected per file and
+  named — path + reason — on stderr after the loop, with a processed/total
+  summary; the run exits non-zero at the end if any lint errors, score
+  misses, or parse failures occurred. Pinned by
+  `tests/multi_file_lint.rs`. The gate-scope decision — guard scans the
+  top level of `specs/` (active contracts); `specs/roadmap/` sits outside
+  gate scope as staged future work, covered by explicit per-file lint — is
+  documented in `docs/gate-scope.md`, cross-linked from
+  `docs/frozen-specs.md` and pinned by a docs-reading test.
+
 - **frozen specs: carve-out decision documented, flagged set marked** — docs
   + test only, no code change (the `boundaries-path` rule itself is
   untouched). 11 historical specs whose scenarios cite example paths outside
