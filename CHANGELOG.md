@@ -1,5 +1,23 @@
 ## Unreleased
 
+- **docs(plan-check): documentation page for the plan gate** —
+  `docs/plan-check.md` documents `agent-spec plan-check` from the code:
+  the command surface (`plan-check <PLAN> [--format text|json]`), exit
+  codes (0 valid; 1 on `plan validation failed` or an unreadable file;
+  warnings never fail), text/JSON output shapes, all four validated
+  areas with their grammars and real quoted error messages — Dependencies
+  (`TASK_N: [TASK_M]` edges, unknown-target errors, cycle detection),
+  Ledger Resolution (header-driven Item/Disposition columns, disposition
+  tokens `done(<ref>)` / `closed(<reason>)` / `deferred(trigger: …)`,
+  no-op when absent), Bottleneck (whole-plan tag scan, unknown tags are
+  warnings) and Sieve (Cell|Verdict table, V/R/E/path enums, `Outcome:`
+  ∈ propose/build-direct, no-op when absent) — plus the contract-status
+  consistency warning and a truthful cross-reference clarifying that
+  `--spec-dir/--code/--change/--change-scope/--min-score/--cache` are
+  guard/lifecycle/verify/lint flags, not plan-check flags. Docs+test
+  only, no version bump (068/070 precedent); pinned by the new
+  `tests/gate_docs.rs` (`plan_check_docs_page_documents_sections`).
+
 - **feat(plan-check): Sieve sections are validated now** — proposal plans
   now carry a validated forced-choice verdict, and a parked idea can never
   become a plan file. When a plan carries `## Sieve`, plan-check parses
