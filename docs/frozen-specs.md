@@ -37,9 +37,13 @@ three deliberate edits, never a silent drift.
 ## The frozen set (enumerated 2026-11-17)
 
 16 `boundaries-path` findings across 11 files, enumerated with per-file
-`cargo run -- lint` runs. (A combined `lint specs/*.md specs/roadmap/*.md`
-run silently stops at `specs/roadmap/README.md` — no front-matter — so
-combined runs under-report; enumerate per file.)
+`cargo run -- lint` runs. (Before v0.3.3, a combined `lint specs/*.md
+specs/roadmap/*.md` run silently stopped at `specs/roadmap/README.md` — no
+front-matter — so combined runs under-reported; the workaround was to
+enumerate per file. v0.3.3 fixed the abort: combined runs now report every
+good file and name every bad one at the end — see
+[docs/gate-scope.md](gate-scope.md) for why the roadmap directory sits
+outside guard's gate scope.)
 
 | Spec | Findings |
 |------|----------|

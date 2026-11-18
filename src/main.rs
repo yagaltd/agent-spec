@@ -415,6 +415,10 @@ fn cmd_parse(files: &[PathBuf], format: &str) -> Result<(), Box<dyn std::error::
 
 // ── Lint ────────────────────────────────────────────────────────
 
+/// Lint every file: emit a report for each processable file and name every
+/// unparseable file (path + reason) at the end. A parse failure never aborts
+/// the run mid-loop — silently unprocessed files are the vacuous-pass class
+/// by another door (plan-067's durable count was poisoned by exactly this).
 fn cmd_lint(
     files: &[PathBuf],
     format: &str,
@@ -423,9 +427,17 @@ fn cmd_lint(
     let pipeline = agent_spec::spec_lint::LintPipeline::with_defaults();
     let out_format = parse_output_format(format);
     let mut any_failed = false;
+    let mut parse_failures: Vec<(PathBuf, String)> = Vec::new();
 
     for file in files {
-        let doc = agent_spec::spec_parser::parse_spec(file)?;
+        let doc = match agent_spec::spec_parser::parse_spec(file) {
+            Ok(doc) => doc,
+            Err(e) => {
+                // Record and continue — later files still get processed.
+                parse_failures.push((file.clone(), e.to_string()));
+                continue;
+            }
+        };
         let report = pipeline.run(&doc);
 
         println!(
@@ -449,6 +461,24 @@ fn cmd_lint(
             );
             any_failed = true;
         }
+    }
+
+    // Aggregate after the loop: every bad file named with its reason.
+    if !parse_failures.is_empty() {
+        for (file, reason) in &parse_failures {
+            eprintln!("error: {}: {reason}", file.display());
+        }
+        eprintln!(
+            "lint run processed {} of {} file(s); {} failed to parse",
+            files.len() - parse_failures.len(),
+            files.len(),
+            parse_failures.len(),
+        );
+        return Err(format!(
+            "lint failed: {} file(s) could not be parsed",
+            parse_failures.len()
+        )
+        .into());
     }
 
     if any_failed {
