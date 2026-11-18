@@ -2,6 +2,7 @@ spec: task
 name: "支持 .spec.md 双扩展名"
 inherits: project
 tags: [enhancement, ux, backward-compat]
+frozen: 20261117 plan-20261117-068
 ---
 
 ## 意图

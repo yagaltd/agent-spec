@@ -2,6 +2,7 @@ spec: task
 name: "verify 与 lifecycle 支持可选 change scope"
 inherits: project
 tags: [bootstrap, cli, git, boundaries, lifecycle, verify, phase4]
+frozen: 20261117 plan-20261117-068
 ---
 
 ## 意图

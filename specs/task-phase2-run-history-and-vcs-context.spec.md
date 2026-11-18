@@ -2,6 +2,7 @@ spec: task
 name: "Phase 2：Run History 与 VCS Context"
 inherits: project
 tags: [roadmap, planned, phase2, traceability]
+frozen: 20261117 plan-20261117-068
 ---
 
 ## 意图

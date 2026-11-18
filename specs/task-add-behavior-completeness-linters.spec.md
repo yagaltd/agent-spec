@@ -2,6 +2,7 @@ spec: task
 name: "新增行为完整性 lint"
 inherits: project
 tags: [contract-quality, lint, behavior, phase-next]
+frozen: 20261117 plan-20261117-068
 ---
 
 ## 意图

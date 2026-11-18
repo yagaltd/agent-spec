@@ -2,6 +2,7 @@ spec: task
 name: "Verification cache (spike)"
 tags: [performance, cache, spike]
 max-rounds: 2
+frozen: 20261117 plan-20261117-068
 ---
 
 ## Intent

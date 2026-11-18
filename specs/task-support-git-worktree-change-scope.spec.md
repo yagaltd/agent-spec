@@ -2,6 +2,7 @@ spec: task
 name: "Guard 支持 git worktree change scope"
 inherits: project
 tags: [bootstrap, cli, git, boundaries, guard, phase4]
+frozen: 20261117 plan-20261117-068
 ---
 
 ## 意图
