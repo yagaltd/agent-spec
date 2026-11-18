@@ -2,6 +2,7 @@ spec: task
 name: "强化 rewrite/parity 合同写作"
 inherits: project
 tags: [contract-quality, skills, templates, parity, phase-next]
+frozen: 20261117 plan-20261117-068
 ---
 
 ## 意图

@@ -4,6 +4,7 @@ inherits: project
 tags: [bootstrap, lifecycle, phase9]
 depends: [task-spec-dependency-graph]
 estimate: 1.5d
+frozen: 20261117 plan-20261117-068
 ---
 
 ## 意图

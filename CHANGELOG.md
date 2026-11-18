@@ -1,3 +1,14 @@
+## Unreleased
+
+- **frozen specs: carve-out decision documented, flagged set marked** — docs
+  + test only, no code change (the `boundaries-path` rule itself is
+  untouched). 11 historical specs whose scenarios cite example paths outside
+  their own Allowed Changes (16 findings, enumerated 2026-11-17) now carry a
+  `frozen: 20261117 plan-20261117-068` frontmatter marker: frozen specs are
+  a historical record; guard/lifecycle/boundaries-path apply to new and
+  revised specs only. Semantics and the full list: `docs/frozen-specs.md`;
+  the set is pinned by `tests/frozen_specs.rs`.
+
 ## v0.3.2 — boundaries lint + ledger check (2026-11-17)
 
 - **lint(boundaries): criteria paths must resolve inside Allowed Changes** — the

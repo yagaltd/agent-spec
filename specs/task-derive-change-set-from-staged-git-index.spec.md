@@ -2,6 +2,7 @@ spec: task
 name: "Guard 自动推导 staged change set"
 inherits: project
 tags: [bootstrap, cli, git, boundaries, guard]
+frozen: 20261117 plan-20261117-068
 ---
 
 ## 意图

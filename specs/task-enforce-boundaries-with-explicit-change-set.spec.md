@@ -2,6 +2,7 @@ spec: task
 name: "对显式 change set 执行边界校验"
 inherits: project
 tags: [bootstrap, verify, boundaries, contract]
+frozen: 20261117 plan-20261117-068
 ---
 
 ## 意图
