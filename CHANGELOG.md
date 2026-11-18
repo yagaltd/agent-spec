@@ -1,5 +1,22 @@
 ## Unreleased
 
+- **feat(plan-check): Sieve sections are validated now** — proposal plans
+  now carry a validated forced-choice verdict, and a parked idea can never
+  become a plan file. When a plan carries `## Sieve`, plan-check parses
+  the Cell|Verdict table (header-driven, pinned 0/1 fallback, trimmed
+  cells) plus the `Outcome:` line and checks the enums: V ∈
+  nice-to-have/useful/valuable/must-have, R ∈
+  trivial/contained/serious/severe, E ∈ xs/s/m/l, path ∈
+  research/inspect/grill/none, Outcome ∈ propose/build-direct — all
+  case-insensitive. `Outcome: park` (or any other non-enum) is an error
+  naming the line and the rule — parked ideas are ledger rows, never
+  plans; a malformed, unknown or missing verdict cell, a missing V/R/E/
+  path row and a missing Outcome line are errors naming the cell/section
+  and line. Plans without a Sieve section are a no-op — rejecting those
+  stays forbidden (non-proposal plans are legal). Structure mirrors
+  `validate_ledger_resolution`; pinned by the four `plan_check_*sieve*`
+  tests in `src/main.rs`.
+
 - **fix(boundaries): bare root filenames in Allowed lists are path
   boundaries now** — an entry like `README.md` was dropped as prose (no
   `/`, no `*`, not a dotfile, suffix not on a hardcoded list), so the

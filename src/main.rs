@@ -2699,6 +2699,10 @@ fn check_plan(content: &str) -> PlanCheckResult {
     let ledger_errors = validate_ledger_resolution(content);
     errors.extend(ledger_errors);
 
+    // Validate the ## Sieve section (no-op when absent)
+    let sieve_errors = validate_sieve(content);
+    errors.extend(sieve_errors);
+
     // Extract task IDs from spec map
     let tasks = extract_task_ids(content);
 
@@ -2889,6 +2893,140 @@ fn valid_disposition(cell: &str) -> bool {
             .is_some_and(|condition| !condition.trim().is_empty()),
         _ => false,
     }
+}
+
+/// Validate the plan's `## Sieve` section (pi-workflows plan 20261117-073
+/// normative grammar): a Cell|Verdict table with one forced-choice row each
+/// for V, R, E and path, plus an `Outcome:` line ∈ {propose, build-direct}.
+/// `park` (or any non-enum) as Outcome is an error — parked ideas are ledger
+/// rows, never plans. A plan without the section is a no-op (non-proposal
+/// plans stay legal). Enums are case-insensitive; errors quote the cell and
+/// the 1-based line.
+fn validate_sieve(content: &str) -> Vec<String> {
+    const ROW_KINDS: [&str; 4] = ["v", "r", "e", "path"];
+    const ROW_LABELS: [&str; 4] = ["V", "R", "E", "path"];
+    const V_VALUES: [&str; 4] = ["nice-to-have", "useful", "valuable", "must-have"];
+    const R_VALUES: [&str; 4] = ["trivial", "contained", "serious", "severe"];
+    const E_VALUES: [&str; 4] = ["xs", "s", "m", "l"];
+    const PATH_VALUES: [&str; 4] = ["research", "inspect", "grill", "none"];
+    const OUTCOME_VALUES: [&str; 2] = ["propose", "build-direct"];
+
+    let mut errors = Vec::new();
+    let lines: Vec<&str> = content.lines().collect();
+    let Some(start) = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("## Sieve"))
+    else {
+        return errors;
+    };
+
+    let mut cell_col = 0usize;
+    let mut verdict_col = 1usize;
+    let mut seen = [false; 4];
+    let mut outcome: Option<(String, usize)> = None;
+
+    for (idx, line) in lines.iter().enumerate().skip(start + 1) {
+        let trimmed = line.trim();
+        if trimmed.starts_with("## ") {
+            break; // next plan section
+        }
+        if trimmed.to_ascii_lowercase().starts_with("outcome:") {
+            outcome = Some((trimmed["outcome:".len()..].trim().to_string(), idx + 1));
+            continue;
+        }
+        if !trimmed.starts_with('|') {
+            continue;
+        }
+        let cells: Vec<String> = trimmed
+            .trim_matches('|')
+            .split('|')
+            .map(|cell| cell.trim().to_string())
+            .collect();
+
+        // First table row is the header: locate the Cell/Verdict columns
+        // (pinned template positions as fallback), then skip it.
+        if let Some(disp) = cells.iter().position(|c| c.eq_ignore_ascii_case("verdict")) {
+            verdict_col = disp;
+            cell_col = cells
+                .iter()
+                .position(|c| c.eq_ignore_ascii_case("cell"))
+                .unwrap_or(0);
+            continue;
+        }
+        // Separator row (|---|): no tokens.
+        if cells
+            .iter()
+            .all(|c| c.is_empty() || c.chars().all(|ch| ch == '-' || ch == ':'))
+        {
+            continue;
+        }
+
+        let cell_name = cells
+            .get(cell_col)
+            .map(String::as_str)
+            .unwrap_or("<no cell>");
+        let kind = cell_name
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let Some(pos) = ROW_KINDS.iter().position(|&k| k == kind) else {
+            errors.push(format!(
+                "sieve row '{cell_name}' (line {}): unknown Cell — expected V, R, E or path",
+                idx + 1
+            ));
+            continue;
+        };
+        seen[pos] = true;
+        let allowed: &[&str] = match pos {
+            0 => &V_VALUES,
+            1 => &R_VALUES,
+            2 => &E_VALUES,
+            _ => &PATH_VALUES,
+        };
+        let Some(verdict) = cells.get(verdict_col) else {
+            errors.push(format!(
+                "sieve row '{cell_name}' (line {}): missing Verdict cell",
+                idx + 1
+            ));
+            continue;
+        };
+        if !allowed.iter().any(|v| verdict.eq_ignore_ascii_case(v)) {
+            errors.push(format!(
+                "sieve row '{cell_name}' (line {}): invalid verdict '{verdict}' — expected one of: {}",
+                idx + 1,
+                allowed.join(", ")
+            ));
+        }
+    }
+
+    for (pos, was_seen) in seen.iter().enumerate() {
+        if !was_seen {
+            errors.push(format!(
+                "Sieve section (line {}): missing {} row — the Cell|Verdict table needs one row for each of V, R, E, path",
+                start + 1,
+                ROW_LABELS[pos]
+            ));
+        }
+    }
+
+    match outcome {
+        Some((value, line_no)) => {
+            let canonical = value.to_ascii_lowercase();
+            if !OUTCOME_VALUES.contains(&canonical.as_str()) {
+                errors.push(format!(
+                    "invalid Outcome '{value}' (line {line_no}) — expected one of: {}; parked ideas are ledger rows, never plans",
+                    OUTCOME_VALUES.join(", ")
+                ));
+            }
+        }
+        None => errors.push(format!(
+            "Sieve section (line {}): missing Outcome line — expected 'Outcome: propose' or 'Outcome: build-direct'",
+            start + 1
+        )),
+    }
+
+    errors
 }
 
 /// Parse the ## Dependencies block from plan.md
@@ -5037,6 +5175,111 @@ Scenario: pass
             Some prose with | pipes | but no ledger heading.\n\
             \n\
             ## Lifecycle\n";
+        let result = check_plan(content);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(result.valid);
+    }
+
+    const SIEVE_SECTION: &str = "## Sieve\n\
+        \n\
+        | Cell | Verdict |\n\
+        |---|---|\n\
+        | V value | valuable |\n\
+        | R risk | contained |\n\
+        | E effort | s |\n\
+        | path | none |\n\
+        \n\
+        Outcome: propose\n";
+
+    #[test]
+    fn plan_check_valid_sieve_section_passes() {
+        // The normative grammar shape (pi-workflows plan 20261117-073) passes
+        let result = check_plan(SIEVE_SECTION);
+        assert!(result.valid);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+
+        // Enums are case-insensitive; trimmed cells still pass
+        let sloppy = "## Sieve\n\
+            \n\
+            |  Cell  |  Verdict  |\n\
+            |---|---|\n\
+            | V value |  MUST-HAVE |\n\
+            | R risk | Serious |\n\
+            | E effort | XS |\n\
+            | path | Grill |\n\
+            \n\
+            Outcome:  Build-Direct \n";
+        let result = check_plan(sloppy);
+        assert!(
+            result.valid,
+            "case-insensitive enums must pass: {:?}",
+            result.errors
+        );
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+    }
+
+    #[test]
+    fn plan_check_park_outcome_is_error() {
+        let bad = SIEVE_SECTION.replace("Outcome: propose", "Outcome: park");
+        let result = check_plan(&bad);
+        assert!(!result.valid);
+        assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
+        let err = &result.errors[0];
+        assert!(err.contains("park"), "must name the outcome: {err}");
+        assert!(err.contains("line 10"), "must name the line: {err}");
+        assert!(
+            err.contains("propose, build-direct"),
+            "must name the rule's enum: {err}"
+        );
+        assert!(
+            err.contains("parked ideas are ledger rows"),
+            "must state the ledger-instead rule: {err}"
+        );
+    }
+
+    #[test]
+    fn plan_check_malformed_sieve_enums_are_errors() {
+        // V=must is not in the enum — the error names the cell
+        let bad_v = SIEVE_SECTION.replace("| V value | valuable |", "| V value | must |");
+        let result = check_plan(&bad_v);
+        assert!(!result.valid);
+        assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
+        let err = &result.errors[0];
+        assert!(err.contains("V value"), "must name the Cell: {err}");
+        assert!(err.contains("line 5"), "must name the line: {err}");
+        assert!(err.contains("'must'"), "must quote the verdict: {err}");
+
+        // E=huge is not in the enum — the error names the cell
+        let bad_e = SIEVE_SECTION.replace("| E effort | s |", "| E effort | huge |");
+        let result = check_plan(&bad_e);
+        assert!(!result.valid);
+        assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
+        let err = &result.errors[0];
+        assert!(err.contains("E effort"), "must name the Cell: {err}");
+        assert!(err.contains("line 7"), "must name the line: {err}");
+        assert!(err.contains("'huge'"), "must quote the verdict: {err}");
+
+        // A verdict cell cut off mid-row is malformed too
+        let no_cell = SIEVE_SECTION.replace("| path | none |", "| path |");
+        let result = check_plan(&no_cell);
+        assert!(!result.valid);
+        let err = result
+            .errors
+            .iter()
+            .find(|e| e.contains("missing Verdict cell"))
+            .expect("missing Verdict cell must be named");
+        assert!(err.contains("path"), "must name the Cell: {err}");
+        assert!(err.contains("line 8"), "must name the line: {err}");
+    }
+
+    #[test]
+    fn plan_check_ignores_missing_sieve() {
+        // Even park-flavored prose outside a Sieve section is a no-op
+        let content = "## Plan\n\
+            \n\
+            Prose with | pipes | and an Outcome: park line, but no Sieve heading.\n\
+            \n\
+            ## Tasks\n";
         let result = check_plan(content);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         assert!(result.valid);
