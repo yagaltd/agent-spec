@@ -1,5 +1,30 @@
 ## Unreleased
 
+- **fix(boundaries): bare root filenames in Allowed lists are path
+  boundaries now** — an entry like `README.md` was dropped as prose (no
+  `/`, no `*`, not a dotfile, suffix not on a hardcoded list), so the
+  exact file it named fell outside every allowed boundary and guard
+  failed the change set with "not covered by any allowed boundary". The
+  matcher rule is now: an Allowed entry is a path boundary iff it
+  contains `/` or `*`, starts with a dot (0.3.1 dotfile behavior), or
+  its final segment contains a dot — a file extension (README.md,
+  package.json, Cargo.toml, Cargo.lock, vitest.config.ts). A bare word
+  with no dot in any segment stays prose, extension-bearing entries
+  anchor to the EXACT file (never a directory prefix), and the `./`
+  prefix keeps working. Exit semantics untouched — fail-closed stays
+  fail-closed. Pinned by the five named tests in
+  `src/spec_verify/boundaries.rs`.
+
+- **fix(guard): the evidence run no longer sweeps the target repo's
+  fixtures** — guard/lifecycle invoked the target repo's test runner
+  (`bun test`) as a full sweep, so `tests/fixtures/**` were loaded and
+  run: fixture copies of real tests failed on every run and their
+  `(fail)` lines polluted the collected evidence stdout with
+  pre-existing failures from unrelated repos. The bun evidence run now
+  passes `--path-ignore-patterns **/fixtures/**` by default, so fixture
+  directories are never loaded. Exit semantics untouched. Documented in
+  `docs/gate-scope.md`; pinned by
+  `test_guard_runner_excludes_fixtures`.
 - **fix(lint): a multi-file run no longer aborts on the first unparseable
   file** — `agent-spec lint a b c` used to propagate the first
   parse-failure with `?`, so files after the bad one were silently

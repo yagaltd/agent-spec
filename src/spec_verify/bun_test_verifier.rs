@@ -21,6 +21,12 @@ use super::{VerificationContext, Verifier};
 /// produces.
 pub struct BunTestVerifier;
 
+/// Evidence-run default: target-repo fixture directories hold static test
+/// data, not live contracts. Sweeping them ran fixture copies of real tests,
+/// whose `(fail)` lines polluted guard's collected evidence stdout (plan
+/// 20261117-070 task 1). Appended to every `bun test` evidence invocation.
+pub(crate) const FIXTURE_IGNORE_ARGS: [&str; 2] = ["--path-ignore-patterns", "**/fixtures/**"];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BunOutcome {
     Passed,
@@ -48,7 +54,7 @@ impl Verifier for BunTestVerifier {
 
             let started = Instant::now();
             let selector_label = binding.selector.label();
-            let (program, base_args) = bun_test_command(&project_root);
+            let (program, base_args) = bun_evidence_command(&project_root);
             let output = Command::new(&program)
                 .args(&base_args)
                 .args(["-t", &binding.selector.filter])
@@ -180,6 +186,17 @@ pub(crate) fn bun_test_command(root: &Path) -> (String, Vec<String>) {
     }
 
     ("bun".into(), vec!["test".into()])
+}
+
+/// Full evidence-run invocation for the guard/lifecycle bun layer: the
+/// script-resolved base command plus the fixture-exclusion default. The
+/// exclusion lives HERE — every caller of [`bun_test_command`] inside the
+/// verify pipeline sweeps the whole target repo, so fixture directories
+/// must be ignored by default (plan 20261117-070 task 1).
+pub(crate) fn bun_evidence_command(root: &Path) -> (String, Vec<String>) {
+    let (program, mut args) = bun_test_command(root);
+    args.extend(FIXTURE_IGNORE_ARGS.iter().map(|arg| (*arg).to_string()));
+    (program, args)
 }
 
 /// Parse captured bun test output for the result of a single named test.
@@ -366,8 +383,8 @@ mod tests {
         parse_bun_output_for_test,
     };
     use crate::spec_core::{
-        ResolvedSpec, Scenario, Section, Span, SpecDocument, SpecLevel, SpecMeta, Step, StepKind,
-        TestSelector, Verdict,
+        Evidence, ResolvedSpec, Scenario, Section, Span, SpecDocument, SpecLevel, SpecMeta, Step,
+        StepKind, TestSelector, Verdict,
     };
     use crate::spec_verify::{AiMode, Verifier};
 
@@ -637,6 +654,74 @@ mod tests {
         assert_eq!(
             parse_bun_output_for_test(out, "alpha passes"),
             BunOutcome::Passed
+        );
+    }
+
+    // ── plan 20261117-070 task 1: the evidence run ignores target fixtures ──
+
+    #[test]
+    fn test_guard_runner_excludes_fixtures() {
+        // Shape pin (deterministic, no bun needed): the evidence run's argv
+        // ignores target-repo `**/fixtures/**` paths — both the hardcoded
+        // fallback command and a package.json-resolved one.
+        for package_json in [
+            None,
+            Some(r#"{"scripts": {"test": "bun test --preload ./p.ts"}}"#),
+        ] {
+            let root = temp_root("argv");
+            if let Some(json) = package_json {
+                fs::write(root.join("package.json"), json).unwrap();
+            }
+            let (program, args) = super::bun_evidence_command(&root);
+            assert_eq!(program, "bun");
+            let needle = super::FIXTURE_IGNORE_ARGS.to_vec();
+            assert!(
+                args.windows(needle.len()).any(|window| window == needle),
+                "evidence argv must exclude **/fixtures/**; got {args:?}"
+            );
+        }
+
+        if std::process::Command::new("bun")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+
+        // Behavior pin: a fixture copy of a real test fails on the sweep and
+        // its `(fail)` line used to pollute the collected evidence stdout.
+        let root = temp_root("fixtures");
+        fs::create_dir_all(root.join("tests/fixtures")).unwrap();
+        fs::write(
+            root.join("probe.test.ts"),
+            "import { test, expect } from \"bun:test\";\n\
+             test(\"alpha passes\", () => { expect(1 + 1).toBe(2); });\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("tests/fixtures/broken.test.ts"),
+            "import { test, expect } from \"bun:test\";\n\
+             test(\"alpha passes, fixture copy\", () => { expect(1).toBe(2); });\n",
+        )
+        .unwrap();
+
+        let mut ctx = spec_with_selector("s-fixture-excluded", "alpha passes");
+        ctx.code_paths = vec![root.clone()];
+
+        let results = BunTestVerifier.verify(&ctx).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].verdict, Verdict::Pass);
+        let Evidence::TestOutput { stdout, .. } = &results[0].evidence[0] else {
+            panic!("expected test-output evidence");
+        };
+        assert!(
+            !stdout.contains("(fail)"),
+            "fixture failures leaked into guard evidence: {stdout}"
+        );
+        assert!(
+            !stdout.contains("fixture copy"),
+            "fixture test ran inside the evidence sweep: {stdout}"
         );
     }
 
