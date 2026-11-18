@@ -130,6 +130,13 @@ fn collect_path_boundaries(sections: &[crate::spec_core::Section]) -> (Vec<Strin
     (allowed, forbidden)
 }
 
+/**
+ * @cc [label:boundaries] allowed-entry-path-boundary-rule
+ * An Allowed entry is a path boundary iff it contains `/` or `*`, starts
+ * with a dot (dotfile, 0.3.1), OR its final segment contains a dot (a file
+ * extension). Extension-bearing entries anchor to the EXACT file, never a
+ * directory prefix; a bare word with no dot in any segment stays prose.
+ */
 pub(crate) fn looks_like_path_boundary(text: &str) -> bool {
     let trimmed = text.trim();
     // a dotfile is a path even without a separator or a known suffix
@@ -139,12 +146,15 @@ pub(crate) fn looks_like_path_boundary(text: &str) -> bool {
         || trimmed.contains('/')
         || trimmed.contains('\\')
         || trimmed.contains('*')
-        || trimmed.ends_with(".rs")
-        || trimmed.ends_with(".ts")
-        || trimmed.ends_with(".js")
-        || trimmed.ends_with(".py")
-        || trimmed.ends_with(".spec")
-        || trimmed.ends_with(".spec.md")
+        // a bare root filename with an extension is a path too (README.md,
+        // package.json, Cargo.toml, Cargo.lock, vitest.config.ts) — dropping
+        // it let the named file land outside every allowed boundary (plan
+        // 20261117-070). The final segment carries the verdict so multi-
+        // segment entries stay governed by the separator rules above.
+        || trimmed
+            .rsplit(['/', '\\'])
+            .next()
+            .is_some_and(|segment| segment.contains('.'))
 }
 
 fn normalize_change_paths(paths: &[PathBuf], workspace_root: Option<&Path>) -> Vec<String> {
@@ -577,6 +587,115 @@ name: "probe"
             })
             .unwrap();
 
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].verdict, Verdict::Pass);
+    }
+
+    // ---- plan 20261117-070 task 1: bare root filenames are path boundaries ----
+
+    fn verify_change(allowed: &str, change: &str) -> Vec<crate::spec_core::ScenarioResult> {
+        let resolved = make_resolved_spec(&format!(
+            r#"spec: task
+name: "probe"
+---
+
+## Boundaries
+
+### Allowed Changes
+- {allowed}
+"#
+        ))
+        .unwrap();
+
+        let verifier = BoundariesVerifier;
+        verifier
+            .verify(&VerificationContext {
+                code_paths: vec![PathBuf::from(".")],
+                change_paths: vec![PathBuf::from(change)],
+                ai_mode: AiMode::Off,
+                resolved_spec: resolved,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn test_bare_filename_boundary_matches_exact_file() {
+        assert!(super::looks_like_path_boundary("README.md"));
+        let results = verify_change("README.md", "README.md");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].verdict, Verdict::Pass);
+    }
+
+    #[test]
+    fn test_extension_bearing_entries_anchor() {
+        for entry in [
+            "CHANGELOG.md",
+            "package.json",
+            "Cargo.toml",
+            "Cargo.lock",
+            "vitest.config.ts",
+        ] {
+            assert!(
+                super::looks_like_path_boundary(entry),
+                "{entry} must be a path boundary"
+            );
+            let results = verify_change(entry, entry);
+            assert_eq!(results.len(), 1, "{entry} must produce a boundary check");
+            assert_eq!(
+                results[0].verdict,
+                Verdict::Pass,
+                "{entry} must cover itself"
+            );
+        }
+        // Anchor to the EXACT file: a directory prefix must not match.
+        let results = verify_change("CHANGELOG.md", "CHANGELOG.md/notes.txt");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].verdict, Verdict::Fail);
+        assert!(
+            results[0].step_results[0]
+                .reason
+                .contains("not covered by any allowed boundary")
+        );
+    }
+
+    #[test]
+    fn test_prose_entries_stay_prose() {
+        assert!(!super::looks_like_path_boundary("the parser module"));
+        // Dropped as prose: no boundary is declared, so nothing covers the file.
+        assert!(!super::path_matches_pattern(
+            &super::normalize_pattern("the parser module"),
+            "parser-module"
+        ));
+        assert_eq!(
+            verify_change("the parser module", "parser-module").len(),
+            0,
+            "a prose bullet must not declare a covering boundary"
+        );
+    }
+
+    #[test]
+    fn test_dotfile_and_annotation_behavior_preserved() {
+        // 0.3.1 pin: dotfiles are paths.
+        assert!(super::looks_like_path_boundary(".gitignore"));
+        assert!(super::looks_like_path_boundary(".github/workflows/ci.yml"));
+        assert!(!super::looks_like_path_boundary(
+            "use tokio for the runtime"
+        ));
+        // 0.3.1 pin: trailing annotations are prose, stripped from the pattern.
+        assert_eq!(
+            super::normalize_pattern("src/spec_gateway/cache.rs (new)"),
+            "src/spec_gateway/cache.rs"
+        );
+        assert_eq!(
+            super::normalize_pattern("`src/x.rs` (new file)"),
+            "src/x.rs"
+        );
+    }
+
+    #[test]
+    fn test_dot_prefix_still_matches() {
+        assert!(super::looks_like_path_boundary("./README.md"));
+        let results = verify_change("./README.md", "README.md");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].verdict, Verdict::Pass);
     }

@@ -40,3 +40,25 @@ put staged work into the CI gate with no opt-out. If a roadmap directory
 ever needs gate coverage, the mechanism already exists — move the spec to
 the top level (promotion), or pass the files to `lint`/`lifecycle`
 explicitly.
+
+## The evidence run ignores target-repo fixtures
+
+Decided: 2026-11-17 · pi-workflows plan `20261117-070`, task 1 · pinned by
+`spec_verify::bun_test_verifier::tests::test_guard_runner_excludes_fixtures`.
+
+When guard/lifecycle collects test evidence, it invokes the target repo's
+test runner — for Bun projects, `bun test` (resolved from the package.json
+`test` script when it starts with `bun`). That invocation **ignores paths
+matching `**/fixtures/**` by default**: bun runs with
+`--path-ignore-patterns **/fixtures/**`, so fixture directories are never
+loaded, let alone executed.
+
+The reason is evidence hygiene, not gate leniency: fixture directories hold
+static test data and fixture copies of real tests, and sweeping them made
+guard's evidence stdout fill with pre-existing fixture failures from the
+target repo (a fixture copy of a named test fails on every run and its
+`(fail)` line lands in the collected evidence next to the real verdict).
+Exit semantics are untouched — fail-closed stays fail-closed; the named
+test still decides the scenario verdict exactly as before. The exclusion is
+appended in `bun_evidence_command` (`src/spec_verify/bun_test_verifier.rs`)
+so every caller in the verify pipeline gets the same default.
